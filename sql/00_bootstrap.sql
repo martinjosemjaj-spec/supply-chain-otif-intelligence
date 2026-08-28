@@ -1,0 +1,222 @@
+-- ============================================================
+-- OTIF_Guardian: Production Bootstrap
+-- Idempotent deployment script
+-- Generated: 2026-08-28
+-- ============================================================
+
+-- ============================================================
+-- 1. RESOURCE MONITOR
+-- ============================================================
+
+CREATE RESOURCE MONITOR IF NOT EXISTS OTIF_GUARDIAN_RM
+  WITH
+    CREDIT_QUOTA = 100
+    FREQUENCY = MONTHLY
+    START_TIMESTAMP = IMMEDIATELY
+    TRIGGERS
+      ON 75 PERCENT DO NOTIFY
+      ON 90 PERCENT DO NOTIFY
+      ON 100 PERCENT DO SUSPEND
+      ON 110 PERCENT DO SUSPEND_IMMEDIATE;
+
+-- ============================================================
+-- 2. WAREHOUSE
+-- ============================================================
+
+CREATE WAREHOUSE IF NOT EXISTS OTIF_GUARDIAN_WH
+  WITH
+    WAREHOUSE_SIZE = 'XSMALL'
+    AUTO_SUSPEND = 60
+    AUTO_RESUME = TRUE
+    INITIALLY_SUSPENDED = TRUE
+    ENABLE_QUERY_ACCELERATION = TRUE
+    COMMENT = 'OTIF Guardian production workload warehouse';
+
+ALTER WAREHOUSE OTIF_GUARDIAN_WH SET RESOURCE_MONITOR = OTIF_GUARDIAN_RM;
+
+-- ============================================================
+-- 3. DATABASE
+-- ============================================================
+
+CREATE DATABASE IF NOT EXISTS OTIF_GUARDIAN
+  COMMENT = 'OTIF (On-Time In-Full) delivery performance monitoring';
+
+-- ============================================================
+-- 4. SCHEMAS
+-- ============================================================
+
+CREATE SCHEMA IF NOT EXISTS OTIF_GUARDIAN.RAW
+  COMMENT = 'Raw ingested data from source systems';
+
+CREATE SCHEMA IF NOT EXISTS OTIF_GUARDIAN.STAGING
+  COMMENT = 'Staging area for transformations and cleansing';
+
+CREATE SCHEMA IF NOT EXISTS OTIF_GUARDIAN.ANALYTICS
+  COMMENT = 'Production analytics tables and views';
+
+CREATE SCHEMA IF NOT EXISTS OTIF_GUARDIAN.SEMANTIC
+  COMMENT = 'Semantic models and Cortex Analyst objects';
+
+CREATE SCHEMA IF NOT EXISTS OTIF_GUARDIAN.ML
+  COMMENT = 'Machine learning models and feature store';
+
+CREATE SCHEMA IF NOT EXISTS OTIF_GUARDIAN.AGENTS
+  COMMENT = 'Cortex Agent definitions and search services';
+
+CREATE SCHEMA IF NOT EXISTS OTIF_GUARDIAN.STREAMLIT
+  COMMENT = 'Streamlit application objects';
+
+CREATE SCHEMA IF NOT EXISTS OTIF_GUARDIAN.AUDIT
+  COMMENT = 'Audit logging and change tracking';
+
+-- ============================================================
+-- 5. ROLES
+-- ============================================================
+
+-- Functional roles
+CREATE ROLE IF NOT EXISTS OTIF_GUARDIAN_ADMIN
+  COMMENT = 'Full administrative access to OTIF Guardian';
+
+CREATE ROLE IF NOT EXISTS OTIF_GUARDIAN_ENGINEER
+  COMMENT = 'Data engineering: ingest, transform, deploy';
+
+CREATE ROLE IF NOT EXISTS OTIF_GUARDIAN_ANALYST
+  COMMENT = 'Read access to analytics and semantic layers';
+
+CREATE ROLE IF NOT EXISTS OTIF_GUARDIAN_APP
+  COMMENT = 'Service account for Streamlit and agents';
+
+-- ============================================================
+-- 6. ROLE HIERARCHY
+-- ============================================================
+
+GRANT ROLE OTIF_GUARDIAN_APP      TO ROLE OTIF_GUARDIAN_ENGINEER;
+GRANT ROLE OTIF_GUARDIAN_ANALYST  TO ROLE OTIF_GUARDIAN_ENGINEER;
+GRANT ROLE OTIF_GUARDIAN_ENGINEER TO ROLE OTIF_GUARDIAN_ADMIN;
+GRANT ROLE OTIF_GUARDIAN_ADMIN    TO ROLE SYSADMIN;
+
+-- ============================================================
+-- 7. GRANTS: DATABASE
+-- ============================================================
+
+GRANT USAGE ON DATABASE OTIF_GUARDIAN TO ROLE OTIF_GUARDIAN_ADMIN;
+GRANT USAGE ON DATABASE OTIF_GUARDIAN TO ROLE OTIF_GUARDIAN_ENGINEER;
+GRANT USAGE ON DATABASE OTIF_GUARDIAN TO ROLE OTIF_GUARDIAN_ANALYST;
+GRANT USAGE ON DATABASE OTIF_GUARDIAN TO ROLE OTIF_GUARDIAN_APP;
+
+-- ============================================================
+-- 8. GRANTS: WAREHOUSE
+-- ============================================================
+
+GRANT USAGE ON WAREHOUSE OTIF_GUARDIAN_WH TO ROLE OTIF_GUARDIAN_ADMIN;
+GRANT USAGE ON WAREHOUSE OTIF_GUARDIAN_WH TO ROLE OTIF_GUARDIAN_ENGINEER;
+GRANT USAGE ON WAREHOUSE OTIF_GUARDIAN_WH TO ROLE OTIF_GUARDIAN_ANALYST;
+GRANT USAGE ON WAREHOUSE OTIF_GUARDIAN_WH TO ROLE OTIF_GUARDIAN_APP;
+
+-- ============================================================
+-- 9. GRANTS: SCHEMAS
+-- ============================================================
+
+-- ADMIN: full control on all schemas
+GRANT ALL PRIVILEGES ON ALL SCHEMAS IN DATABASE OTIF_GUARDIAN TO ROLE OTIF_GUARDIAN_ADMIN;
+GRANT ALL PRIVILEGES ON FUTURE SCHEMAS IN DATABASE OTIF_GUARDIAN TO ROLE OTIF_GUARDIAN_ADMIN;
+
+-- ENGINEER: create/modify in RAW, STAGING, ANALYTICS, ML, AUDIT
+GRANT ALL PRIVILEGES ON SCHEMA OTIF_GUARDIAN.RAW       TO ROLE OTIF_GUARDIAN_ENGINEER;
+GRANT ALL PRIVILEGES ON SCHEMA OTIF_GUARDIAN.STAGING   TO ROLE OTIF_GUARDIAN_ENGINEER;
+GRANT ALL PRIVILEGES ON SCHEMA OTIF_GUARDIAN.ANALYTICS TO ROLE OTIF_GUARDIAN_ENGINEER;
+GRANT ALL PRIVILEGES ON SCHEMA OTIF_GUARDIAN.ML        TO ROLE OTIF_GUARDIAN_ENGINEER;
+GRANT ALL PRIVILEGES ON SCHEMA OTIF_GUARDIAN.AUDIT     TO ROLE OTIF_GUARDIAN_ENGINEER;
+GRANT USAGE ON SCHEMA OTIF_GUARDIAN.SEMANTIC           TO ROLE OTIF_GUARDIAN_ENGINEER;
+GRANT USAGE ON SCHEMA OTIF_GUARDIAN.AGENTS             TO ROLE OTIF_GUARDIAN_ENGINEER;
+GRANT USAGE ON SCHEMA OTIF_GUARDIAN.STREAMLIT          TO ROLE OTIF_GUARDIAN_ENGINEER;
+
+-- ANALYST: read-only on analytics and semantic
+GRANT USAGE ON SCHEMA OTIF_GUARDIAN.ANALYTICS TO ROLE OTIF_GUARDIAN_ANALYST;
+GRANT USAGE ON SCHEMA OTIF_GUARDIAN.SEMANTIC  TO ROLE OTIF_GUARDIAN_ANALYST;
+GRANT USAGE ON SCHEMA OTIF_GUARDIAN.AGENTS    TO ROLE OTIF_GUARDIAN_ANALYST;
+
+GRANT SELECT ON ALL TABLES IN SCHEMA OTIF_GUARDIAN.ANALYTICS TO ROLE OTIF_GUARDIAN_ANALYST;
+GRANT SELECT ON FUTURE TABLES IN SCHEMA OTIF_GUARDIAN.ANALYTICS TO ROLE OTIF_GUARDIAN_ANALYST;
+GRANT SELECT ON ALL VIEWS IN SCHEMA OTIF_GUARDIAN.ANALYTICS TO ROLE OTIF_GUARDIAN_ANALYST;
+GRANT SELECT ON FUTURE VIEWS IN SCHEMA OTIF_GUARDIAN.ANALYTICS TO ROLE OTIF_GUARDIAN_ANALYST;
+
+-- APP: operational access for Streamlit and agents
+GRANT USAGE ON SCHEMA OTIF_GUARDIAN.STREAMLIT  TO ROLE OTIF_GUARDIAN_APP;
+GRANT USAGE ON SCHEMA OTIF_GUARDIAN.AGENTS     TO ROLE OTIF_GUARDIAN_APP;
+GRANT USAGE ON SCHEMA OTIF_GUARDIAN.ANALYTICS  TO ROLE OTIF_GUARDIAN_APP;
+GRANT USAGE ON SCHEMA OTIF_GUARDIAN.SEMANTIC   TO ROLE OTIF_GUARDIAN_APP;
+
+GRANT SELECT ON ALL TABLES IN SCHEMA OTIF_GUARDIAN.ANALYTICS TO ROLE OTIF_GUARDIAN_APP;
+GRANT SELECT ON FUTURE TABLES IN SCHEMA OTIF_GUARDIAN.ANALYTICS TO ROLE OTIF_GUARDIAN_APP;
+GRANT SELECT ON ALL VIEWS IN SCHEMA OTIF_GUARDIAN.ANALYTICS TO ROLE OTIF_GUARDIAN_APP;
+GRANT SELECT ON FUTURE VIEWS IN SCHEMA OTIF_GUARDIAN.ANALYTICS TO ROLE OTIF_GUARDIAN_APP;
+
+-- ============================================================
+-- 10. STAGES
+-- ============================================================
+
+CREATE STAGE IF NOT EXISTS OTIF_GUARDIAN.RAW.INGEST_STAGE
+  DIRECTORY = (ENABLE = TRUE)
+  COMMENT = 'Landing zone for raw data files';
+
+CREATE STAGE IF NOT EXISTS OTIF_GUARDIAN.RAW.EXTERNAL_STAGE
+  DIRECTORY = (ENABLE = TRUE)
+  COMMENT = 'External data source staging';
+
+CREATE STAGE IF NOT EXISTS OTIF_GUARDIAN.ML.MODEL_STAGE
+  DIRECTORY = (ENABLE = TRUE)
+  COMMENT = 'ML model artifacts and weights';
+
+CREATE STAGE IF NOT EXISTS OTIF_GUARDIAN.STREAMLIT.APP_STAGE
+  DIRECTORY = (ENABLE = TRUE)
+  COMMENT = 'Streamlit application files';
+
+CREATE STAGE IF NOT EXISTS OTIF_GUARDIAN.AGENTS.AGENT_STAGE
+  DIRECTORY = (ENABLE = TRUE)
+  COMMENT = 'Cortex Agent specification files';
+
+-- ============================================================
+-- 11. FILE FORMATS
+-- ============================================================
+
+CREATE FILE FORMAT IF NOT EXISTS OTIF_GUARDIAN.RAW.CSV_FORMAT
+  TYPE = CSV
+  FIELD_OPTIONALLY_ENCLOSED_BY = '"'
+  SKIP_HEADER = 1
+  NULL_IF = ('', 'NULL', 'null', 'N/A')
+  TRIM_SPACE = TRUE
+  ERROR_ON_COLUMN_COUNT_MISMATCH = FALSE
+  COMMENT = 'Standard CSV with header';
+
+CREATE FILE FORMAT IF NOT EXISTS OTIF_GUARDIAN.RAW.JSON_FORMAT
+  TYPE = JSON
+  STRIP_OUTER_ARRAY = TRUE
+  COMMENT = 'Standard JSON array format';
+
+CREATE FILE FORMAT IF NOT EXISTS OTIF_GUARDIAN.RAW.PARQUET_FORMAT
+  TYPE = PARQUET
+  COMMENT = 'Standard Parquet format';
+
+-- ============================================================
+-- 12. SEQUENCES
+-- ============================================================
+
+CREATE SEQUENCE IF NOT EXISTS OTIF_GUARDIAN.RAW.LOAD_BATCH_SEQ
+  START = 1
+  INCREMENT = 1
+  COMMENT = 'Batch ID for data load tracking';
+
+CREATE SEQUENCE IF NOT EXISTS OTIF_GUARDIAN.ANALYTICS.ALERT_SEQ
+  START = 1
+  INCREMENT = 1
+  COMMENT = 'Alert ID sequence for OTIF notifications';
+
+CREATE SEQUENCE IF NOT EXISTS OTIF_GUARDIAN.AUDIT.EVENT_SEQ
+  START = 1
+  INCREMENT = 1
+  COMMENT = 'Audit event sequence';
+
+-- ============================================================
+-- END
+-- ============================================================

@@ -1,0 +1,11 @@
+# OTIF Guardian Streamlit Application
+# Deploy to Snowflake via:
+#   snow streamlit deploy --database OTIF_GUARDIAN --schema STREAMLIT
+
+[streamlit]
+main_file = "app.py"
+query_warehouse = "OTIF_GUARDIAN_WH"
+title = "OTIF Guardian"
+
+[dependencies]
+snowflake-snowpark-python = "*"

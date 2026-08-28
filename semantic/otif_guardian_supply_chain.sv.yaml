@@ -1,0 +1,1231 @@
+name: OTIF_GUARDIAN_SUPPLY_CHAIN
+description: >
+  Supply chain OTIF (On-Time In-Full) performance monitoring semantic model.
+  Covers supplier delivery performance, inventory health, customer order fulfillment,
+  demand-supply balance, and logistics tracking across 8 plants and 60 suppliers.
+
+tables:
+  # ================================================================
+  # DIMENSION: SUPPLIERS
+  # ================================================================
+  - name: SUPPLIERS
+    base_table:
+      database: OTIF_GUARDIAN
+      schema: RAW
+      table: SUPPLIERS
+    description: >
+      Supplier master dimension. Each row represents a unique supplier entity
+      with tier classification, regional assignment, and historical performance scores.
+    synonyms:
+      - "vendor"
+      - "vendors"
+      - "supplier master"
+      - "supply base"
+    dimensions:
+      - name: SUPPLIER_ID
+        expr: SUPPLIER_ID
+        data_type: NUMBER
+        description: "Internal surrogate key for supplier"
+        unique: true
+      - name: SUPPLIER_CODE
+        expr: SUPPLIER_CODE
+        data_type: VARCHAR
+        description: "Business identifier for supplier (SUP-XXXX format)"
+        unique: true
+        synonyms:
+          - "vendor code"
+          - "supplier number"
+      - name: SUPPLIER_NAME
+        expr: SUPPLIER_NAME
+        data_type: VARCHAR
+        description: "Legal trading name of the supplier"
+        synonyms:
+          - "vendor name"
+          - "company name"
+      - name: SUPPLIER_REGION
+        expr: REGION
+        data_type: VARCHAR
+        description: "Geographic region where supplier primarily operates: APAC, EMEA, AMER, or LATAM"
+        synonyms:
+          - "vendor region"
+          - "supplier geography"
+      - name: SUPPLIER_COUNTRY
+        expr: COUNTRY_CODE
+        data_type: VARCHAR
+        description: "ISO-3166 country code of supplier primary operations"
+        synonyms:
+          - "vendor country"
+          - "country of origin"
+      - name: SUPPLIER_TIER
+        expr: SUPPLIER_TIER
+        data_type: NUMBER
+        description: "Strategic classification: 1=Strategic partner, 2=Preferred, 3=Approved"
+        synonyms:
+          - "vendor tier"
+          - "supplier classification"
+          - "strategic tier"
+      - name: SUPPLIER_STATUS
+        expr: STATUS
+        data_type: VARCHAR
+        description: "Current lifecycle status: ACTIVE, PROBATION, INACTIVE, BLOCKED"
+        synonyms:
+          - "vendor status"
+      - name: ONBOARDED_DATE
+        expr: ONBOARDED_DATE
+        data_type: DATE
+        description: "Date when supplier was qualified and onboarded"
+    facts:
+      - name: STANDARD_LEAD_TIME_DAYS
+        expr: STANDARD_LEAD_TIME_DAYS
+        data_type: NUMBER
+        description: "Average fulfillment cycle time in calendar days from PO to goods receipt. Do NOT aggregate with SUM; use AVG."
+        synonyms:
+          - "lead time"
+          - "delivery time"
+      - name: HISTORICAL_OTD_PCT
+        expr: HISTORICAL_OTD_PCT
+        data_type: NUMBER
+        description: "Historical on-time delivery percentage (0-100). Do NOT aggregate with SUM; use AVG or weighted average."
+        synonyms:
+          - "on-time delivery rate"
+          - "OTD rate"
+          - "delivery reliability"
+      - name: QUALITY_SCORE
+        expr: QUALITY_SCORE
+        data_type: NUMBER
+        description: "Composite quality rating (0-100). Do NOT aggregate with SUM; use AVG."
+        synonyms:
+          - "quality rating"
+          - "supplier quality"
+
+  # ================================================================
+  # DIMENSION: PLANTS
+  # ================================================================
+  - name: PLANTS
+    base_table:
+      database: OTIF_GUARDIAN
+      schema: RAW
+      table: PLANTS
+    description: >
+      Plant/site dimension. Each row represents a manufacturing or distribution
+      facility that receives materials and fulfills customer orders.
+    synonyms:
+      - "factory"
+      - "site"
+      - "facility"
+      - "manufacturing plant"
+      - "location"
+    dimensions:
+      - name: PLANT_ID
+        expr: PLANT_ID
+        data_type: NUMBER
+        description: "Internal surrogate key for plant"
+        unique: true
+      - name: PLANT_CODE
+        expr: PLANT_CODE
+        data_type: VARCHAR
+        description: "Business identifier for plant (PLT-MFG-XX format)"
+        unique: true
+        synonyms:
+          - "site code"
+          - "facility code"
+      - name: PLANT_NAME
+        expr: PLANT_NAME
+        data_type: VARCHAR
+        description: "Descriptive name of the plant"
+        synonyms:
+          - "site name"
+          - "factory name"
+      - name: PLANT_CITY
+        expr: CITY
+        data_type: VARCHAR
+        description: "City where plant is located"
+      - name: PLANT_COUNTRY
+        expr: COUNTRY_CODE
+        data_type: VARCHAR
+        description: "ISO-3166 country code of plant location"
+      - name: PLANT_REGION
+        expr: REGION
+        data_type: VARCHAR
+        description: "Geographic region of plant: APAC, EMEA, AMER, LATAM"
+        synonyms:
+          - "site region"
+      - name: PLANT_TIMEZONE
+        expr: TIMEZONE
+        data_type: VARCHAR
+        description: "IANA timezone identifier for the plant"
+    facts:
+      - name: CAPACITY_UNITS_PER_DAY
+        expr: CAPACITY_UNITS_PER_DAY
+        data_type: NUMBER
+        description: "Theoretical maximum daily production throughput in units. Do NOT SUM across plants unless calculating total network capacity."
+        synonyms:
+          - "daily capacity"
+          - "throughput"
+
+  # ================================================================
+  # DIMENSION: MATERIALS
+  # ================================================================
+  - name: MATERIALS
+    base_table:
+      database: OTIF_GUARDIAN
+      schema: RAW
+      table: MATERIALS
+    description: >
+      Material master dimension. Each row is a procurable item with classification,
+      cost, and inventory policy attributes.
+    synonyms:
+      - "item"
+      - "items"
+      - "part"
+      - "parts"
+      - "SKU"
+      - "product"
+      - "material master"
+    dimensions:
+      - name: MATERIAL_ID
+        expr: MATERIAL_ID
+        data_type: NUMBER
+        description: "Internal surrogate key for material"
+        unique: true
+      - name: MATERIAL_CODE
+        expr: MATERIAL_CODE
+        data_type: VARCHAR
+        description: "Business identifier for material (MAT-XXXXX format)"
+        unique: true
+        synonyms:
+          - "part number"
+          - "item code"
+          - "SKU code"
+      - name: MATERIAL_NAME
+        expr: MATERIAL_NAME
+        data_type: VARCHAR
+        description: "Descriptive name with specification"
+        synonyms:
+          - "item name"
+          - "part name"
+      - name: MATERIAL_CATEGORY
+        expr: MATERIAL_CATEGORY
+        data_type: VARCHAR
+        description: "Category grouping: METALS, POLYMERS, ELECTRONICS, RUBBER, CERAMICS, GLASS"
+        synonyms:
+          - "category"
+          - "material type"
+          - "item category"
+      - name: UNIT_OF_MEASURE
+        expr: UNIT_OF_MEASURE
+        data_type: VARCHAR
+        description: "Base unit: KG, EA (each), M (meter), L (liter)"
+        synonyms:
+          - "UOM"
+          - "unit"
+      - name: ABC_CLASS
+        expr: ABC_CLASS
+        data_type: VARCHAR
+        description: "Pareto value classification: A=top 80% value spend, B=next 15%, C=remaining 5%"
+        synonyms:
+          - "ABC classification"
+          - "value class"
+      - name: CRITICALITY
+        expr: CRITICALITY
+        data_type: VARCHAR
+        description: "Supply risk classification: CRITICAL, IMPORTANT, STANDARD"
+        synonyms:
+          - "risk class"
+          - "supply criticality"
+      - name: MATERIAL_STATUS
+        expr: STATUS
+        data_type: VARCHAR
+        description: "Lifecycle status: ACTIVE, INACTIVE, OBSOLETE"
+    facts:
+      - name: STANDARD_UNIT_COST
+        expr: STANDARD_UNIT_COST
+        data_type: NUMBER
+        description: "Current standard cost per unit of measure. Do NOT SUM across materials; use for value calculations by multiplying with quantity."
+        synonyms:
+          - "unit cost"
+          - "cost per unit"
+          - "standard cost"
+      - name: WEIGHT_KG
+        expr: WEIGHT_KG
+        data_type: NUMBER
+        description: "Unit weight in kilograms for logistics calculations. Do NOT SUM across materials directly."
+      - name: SAFETY_STOCK_DAYS
+        expr: SAFETY_STOCK_DAYS
+        data_type: NUMBER
+        description: "Target safety buffer expressed in days of average demand. Do NOT SUM; use AVG for category summaries."
+        synonyms:
+          - "safety stock"
+          - "buffer days"
+
+  # ================================================================
+  # FACT: PO LINES (core delivery performance)
+  # ================================================================
+  - name: PO_LINES
+    base_table:
+      database: OTIF_GUARDIAN
+      schema: RAW
+      table: PO_LINES
+    description: >
+      Purchase order line items — the primary fact table for supplier delivery
+      performance measurement. Each row is a material line on a purchase order
+      with ordered vs received quantities and promised vs actual dates.
+    synonyms:
+      - "purchase order lines"
+      - "PO line items"
+      - "order lines"
+      - "procurement lines"
+    dimensions:
+      - name: PO_LINE_ID
+        expr: PO_LINE_ID
+        data_type: NUMBER
+        description: "Internal surrogate key for PO line"
+        unique: true
+      - name: PO_LINE_STATUS
+        expr: LINE_STATUS
+        data_type: VARCHAR
+        description: "Current line status: OPEN, IN_TRANSIT, PARTIALLY_RECEIVED, CLOSED, SHORT_CLOSED, CANCELLED"
+        synonyms:
+          - "line status"
+          - "PO status"
+      - name: PROMISED_DELIVERY_DATE
+        expr: PROMISED_DELIVERY_DATE
+        data_type: DATE
+        description: "Supplier-confirmed delivery date"
+        synonyms:
+          - "promise date"
+          - "confirmed date"
+          - "supplier commitment date"
+      - name: ACTUAL_DELIVERY_DATE
+        expr: ACTUAL_DELIVERY_DATE
+        data_type: DATE
+        description: "Actual goods receipt date. NULL for lines not yet delivered."
+        synonyms:
+          - "receipt date"
+          - "delivery date"
+          - "arrival date"
+      - name: IS_ON_TIME
+        expr: "CASE WHEN ACTUAL_DELIVERY_DATE IS NOT NULL AND ACTUAL_DELIVERY_DATE <= PROMISED_DELIVERY_DATE THEN TRUE WHEN ACTUAL_DELIVERY_DATE IS NOT NULL THEN FALSE ELSE NULL END"
+        data_type: BOOLEAN
+        description: "TRUE if delivered on or before promised date. NULL if not yet delivered."
+      - name: IS_IN_FULL
+        expr: "CASE WHEN LINE_STATUS = 'CLOSED' AND QUANTITY_RECEIVED >= QUANTITY_ORDERED THEN TRUE WHEN LINE_STATUS IN ('CLOSED','SHORT_CLOSED') THEN FALSE ELSE NULL END"
+        data_type: BOOLEAN
+        description: "TRUE if full quantity received. NULL if line still open."
+      - name: IS_OTIF
+        expr: "CASE WHEN ACTUAL_DELIVERY_DATE IS NOT NULL AND ACTUAL_DELIVERY_DATE <= PROMISED_DELIVERY_DATE AND QUANTITY_RECEIVED >= QUANTITY_ORDERED THEN TRUE WHEN ACTUAL_DELIVERY_DATE IS NOT NULL AND LINE_STATUS IN ('CLOSED','SHORT_CLOSED') THEN FALSE ELSE NULL END"
+        data_type: BOOLEAN
+        description: "TRUE if both on-time AND in-full. NULL if line still open."
+        synonyms:
+          - "OTIF flag"
+          - "on time in full"
+    facts:
+      - name: QUANTITY_ORDERED
+        expr: QUANTITY_ORDERED
+        data_type: NUMBER
+        description: "Quantity committed on the PO line"
+        synonyms:
+          - "ordered quantity"
+          - "order qty"
+      - name: QUANTITY_RECEIVED
+        expr: QUANTITY_RECEIVED
+        data_type: NUMBER
+        description: "Cumulative quantity received against this line"
+        synonyms:
+          - "received quantity"
+          - "received qty"
+      - name: UNIT_PRICE
+        expr: UNIT_PRICE
+        data_type: NUMBER
+        description: "Agreed price per unit of measure for this line. Do NOT SUM; multiply by quantity for line value."
+      - name: LINE_VALUE
+        expr: "QUANTITY_ORDERED * UNIT_PRICE"
+        data_type: NUMBER
+        description: "Total monetary value of this PO line (quantity * unit price)"
+        synonyms:
+          - "PO line value"
+          - "order value"
+      - name: DELIVERY_VARIANCE_DAYS
+        expr: "DATEDIFF('day', PROMISED_DELIVERY_DATE, ACTUAL_DELIVERY_DATE)"
+        data_type: NUMBER
+        description: "Days between promised and actual delivery. Negative=early, 0=on-time, Positive=late. NULL if not delivered."
+        synonyms:
+          - "days late"
+          - "delivery delay"
+          - "lateness"
+      - name: QUANTITY_SHORTFALL
+        expr: "GREATEST(0, QUANTITY_ORDERED - QUANTITY_RECEIVED)"
+        data_type: NUMBER
+        description: "Units short of full delivery. 0 means in-full or over-delivered."
+        synonyms:
+          - "short quantity"
+          - "shortage"
+
+  # ================================================================
+  # FACT: PURCHASE ORDERS (header)
+  # ================================================================
+  - name: PURCHASE_ORDERS
+    base_table:
+      database: OTIF_GUARDIAN
+      schema: RAW
+      table: PURCHASE_ORDERS
+    description: >
+      Purchase order headers linking suppliers to plants.
+      Join to PO_LINES for line-level detail.
+    synonyms:
+      - "POs"
+      - "purchase orders"
+      - "procurement orders"
+    dimensions:
+      - name: PO_ID
+        expr: PO_ID
+        data_type: NUMBER
+        description: "Internal surrogate key"
+        unique: true
+      - name: PO_NUMBER
+        expr: PO_NUMBER
+        data_type: VARCHAR
+        description: "Business identifier (PO-XXXXXXX)"
+        unique: true
+        synonyms:
+          - "order number"
+      - name: ORDER_DATE
+        expr: ORDER_DATE
+        data_type: DATE
+        description: "Date PO was issued to supplier"
+        synonyms:
+          - "PO date"
+          - "issue date"
+      - name: REQUESTED_DELIVERY_DATE
+        expr: REQUESTED_DELIVERY_DATE
+        data_type: DATE
+        description: "Buyer-requested arrival date"
+        synonyms:
+          - "need by date"
+          - "required date"
+      - name: PO_STATUS
+        expr: PO_STATUS
+        data_type: VARCHAR
+        description: "Header status: OPEN, CLOSED, CANCELLED"
+      - name: PO_TYPE
+        expr: PO_TYPE
+        data_type: VARCHAR
+        description: "Order type: STANDARD, BLANKET, EXPEDITE"
+        synonyms:
+          - "order type"
+      - name: CURRENCY
+        expr: CURRENCY
+        data_type: VARCHAR
+        description: "Transaction currency code (USD, EUR, CNY)"
+
+  # ================================================================
+  # FACT: CUSTOMER ORDERS (outbound OTIF)
+  # ================================================================
+  - name: CUSTOMER_ORDERS
+    base_table:
+      database: OTIF_GUARDIAN
+      schema: RAW
+      table: CUSTOMER_ORDERS
+    description: >
+      Customer order fulfillment fact table. Each row is a customer order header
+      with OTIF outcome tracking for outbound delivery performance.
+    synonyms:
+      - "sales orders"
+      - "customer shipments"
+      - "outbound orders"
+    dimensions:
+      - name: ORDER_ID
+        expr: ORDER_ID
+        data_type: NUMBER
+        description: "Internal surrogate key"
+        unique: true
+      - name: ORDER_NUMBER
+        expr: ORDER_NUMBER
+        data_type: VARCHAR
+        description: "Business identifier (CO-XXXXXXX)"
+        unique: true
+      - name: CUSTOMER_CODE
+        expr: CUSTOMER_CODE
+        data_type: VARCHAR
+        description: "Customer identifier"
+        synonyms:
+          - "customer ID"
+          - "account code"
+      - name: CUSTOMER_NAME
+        expr: CUSTOMER_NAME
+        data_type: VARCHAR
+        description: "Customer legal name"
+        synonyms:
+          - "account name"
+          - "client name"
+      - name: CO_ORDER_DATE
+        expr: ORDER_DATE
+        data_type: DATE
+        description: "Date customer placed the order"
+      - name: CO_REQUESTED_DELIVERY_DATE
+        expr: REQUESTED_DELIVERY_DATE
+        data_type: DATE
+        description: "Customer-requested delivery date"
+        synonyms:
+          - "customer need date"
+      - name: ACTUAL_SHIP_DATE
+        expr: ACTUAL_SHIP_DATE
+        data_type: DATE
+        description: "Actual dispatch date. NULL for open orders."
+        synonyms:
+          - "ship date"
+      - name: CO_ORDER_STATUS
+        expr: ORDER_STATUS
+        data_type: VARCHAR
+        description: "Order status: OPEN, PARTIAL, SHIPPED, CANCELLED"
+      - name: CUSTOMER_OTIF_FLAG
+        expr: OTIF_FLAG
+        data_type: BOOLEAN
+        description: "TRUE if order shipped on-time AND in-full. NULL if still open."
+        synonyms:
+          - "customer OTIF"
+          - "outbound OTIF"
+    facts:
+      - name: ORDER_VALUE
+        expr: ORDER_VALUE
+        data_type: NUMBER
+        description: "Total monetary value of the customer order"
+        synonyms:
+          - "revenue"
+          - "order amount"
+          - "sales value"
+      - name: LINE_COUNT
+        expr: LINE_COUNT
+        data_type: NUMBER
+        description: "Number of line items on the order. Do NOT SUM for totals; count orders instead."
+      - name: SHIP_VARIANCE_DAYS
+        expr: "DATEDIFF('day', REQUESTED_DELIVERY_DATE, ACTUAL_SHIP_DATE)"
+        data_type: NUMBER
+        description: "Days between requested delivery and actual ship. Negative=early, 0=on-time, Positive=late."
+        synonyms:
+          - "days late to customer"
+          - "customer delivery delay"
+      - name: REVENUE_AT_RISK
+        expr: "CASE WHEN OTIF_FLAG = FALSE THEN ORDER_VALUE ELSE 0 END"
+        data_type: NUMBER
+        description: "Order value for non-OTIF orders. Represents revenue impacted by delivery failures."
+        synonyms:
+          - "at-risk revenue"
+          - "OTIF failure value"
+
+  # ================================================================
+  # FACT: INVENTORY
+  # ================================================================
+  - name: INVENTORY
+    base_table:
+      database: OTIF_GUARDIAN
+      schema: RAW
+      table: INVENTORY
+    description: >
+      Inventory position snapshot fact. Each row is a material-at-plant stock position.
+      This is a snapshot fact — do NOT SUM days_of_supply across rows.
+    synonyms:
+      - "stock"
+      - "stock levels"
+      - "inventory position"
+      - "on-hand inventory"
+    dimensions:
+      - name: INVENTORY_ID
+        expr: INVENTORY_ID
+        data_type: NUMBER
+        description: "Internal surrogate key"
+        unique: true
+      - name: SNAPSHOT_DATE
+        expr: SNAPSHOT_DATE
+        data_type: DATE
+        description: "Date this inventory position was recorded"
+      - name: INVENTORY_HEALTH
+        expr: "CASE WHEN QTY_ON_HAND = 0 THEN 'STOCKOUT' WHEN DAYS_OF_SUPPLY < 7 THEN 'CRITICAL' WHEN DAYS_OF_SUPPLY < 14 THEN 'LOW' WHEN DAYS_OF_SUPPLY < 45 THEN 'ADEQUATE' ELSE 'EXCESS' END"
+        data_type: VARCHAR
+        description: "Inventory health classification: STOCKOUT, CRITICAL, LOW, ADEQUATE, EXCESS"
+        synonyms:
+          - "stock health"
+          - "inventory status"
+    facts:
+      - name: QTY_ON_HAND
+        expr: QTY_ON_HAND
+        data_type: NUMBER
+        description: "Physical quantity available at the plant"
+        synonyms:
+          - "on hand"
+          - "stock on hand"
+          - "available stock"
+      - name: QTY_IN_TRANSIT
+        expr: QTY_IN_TRANSIT
+        data_type: NUMBER
+        description: "Quantity shipped but not yet received"
+        synonyms:
+          - "in transit"
+          - "pipeline stock"
+      - name: QTY_RESERVED
+        expr: QTY_RESERVED
+        data_type: NUMBER
+        description: "Quantity allocated to existing demand or orders"
+        synonyms:
+          - "reserved"
+          - "allocated"
+      - name: QTY_AVAILABLE
+        expr: "QTY_ON_HAND - QTY_RESERVED"
+        data_type: NUMBER
+        description: "Unreserved quantity available for new commitments"
+      - name: QTY_PROJECTED
+        expr: "QTY_ON_HAND + QTY_IN_TRANSIT - QTY_RESERVED"
+        data_type: NUMBER
+        description: "Forward-looking availability including in-transit supply"
+        synonyms:
+          - "projected stock"
+      - name: REORDER_POINT
+        expr: REORDER_POINT
+        data_type: NUMBER
+        description: "Inventory level at which replenishment should be triggered"
+      - name: DAYS_OF_SUPPLY
+        expr: DAYS_OF_SUPPLY
+        data_type: NUMBER
+        description: "Projected runway at current consumption rate. Do NOT SUM across rows; use AVG for summaries."
+        synonyms:
+          - "DOS"
+          - "coverage days"
+          - "runway"
+      - name: INVENTORY_VALUE
+        expr: INVENTORY_VALUE
+        data_type: NUMBER
+        description: "On-hand quantity multiplied by standard unit cost"
+        synonyms:
+          - "stock value"
+          - "carrying value"
+
+  # ================================================================
+  # FACT: DEMAND
+  # ================================================================
+  - name: DEMAND
+    base_table:
+      database: OTIF_GUARDIAN
+      schema: RAW
+      table: DEMAND
+    description: >
+      Demand signals representing material requirements at plants.
+      Includes firm commitments, planned releases, and statistical forecasts.
+    synonyms:
+      - "demand signals"
+      - "requirements"
+      - "material requirements"
+      - "consumption"
+    dimensions:
+      - name: DEMAND_ID
+        expr: DEMAND_ID
+        data_type: NUMBER
+        description: "Internal surrogate key"
+        unique: true
+      - name: DEMAND_NUMBER
+        expr: DEMAND_NUMBER
+        data_type: VARCHAR
+        description: "Business identifier (DMD-XXXXXXX)"
+      - name: DEMAND_DATE
+        expr: DEMAND_DATE
+        data_type: DATE
+        description: "Date material is needed"
+        synonyms:
+          - "need date"
+          - "requirement date"
+      - name: DEMAND_TYPE
+        expr: DEMAND_TYPE
+        data_type: VARCHAR
+        description: "Certainty level: FIRM (committed), PLANNED (scheduled), FORECAST (projected)"
+        synonyms:
+          - "requirement type"
+      - name: DEMAND_PRIORITY
+        expr: PRIORITY
+        data_type: VARCHAR
+        description: "Urgency: HIGH, MEDIUM, LOW"
+    facts:
+      - name: QUANTITY_DEMANDED
+        expr: QUANTITY_DEMANDED
+        data_type: NUMBER
+        description: "Required quantity in base unit of measure"
+        synonyms:
+          - "demand quantity"
+          - "required quantity"
+          - "need quantity"
+
+  # ================================================================
+  # FACT: SHIPMENTS
+  # ================================================================
+  - name: SHIPMENTS
+    base_table:
+      database: OTIF_GUARDIAN
+      schema: RAW
+      table: SHIPMENTS
+    description: >
+      Inbound shipment tracking fact. Each row is a physical goods movement
+      from supplier to plant via carrier.
+    synonyms:
+      - "deliveries"
+      - "inbound shipments"
+      - "freight"
+      - "transport"
+    dimensions:
+      - name: SHIPMENT_ID
+        expr: SHIPMENT_ID
+        data_type: NUMBER
+        description: "Internal surrogate key"
+        unique: true
+      - name: SHIPMENT_NUMBER
+        expr: SHIPMENT_NUMBER
+        data_type: VARCHAR
+        description: "Business identifier (SHP-XXXXXXXX)"
+      - name: TRANSPORT_MODE
+        expr: TRANSPORT_MODE
+        data_type: VARCHAR
+        description: "Method of transport: AIR, OCEAN, TRUCK, RAIL"
+        synonyms:
+          - "shipping mode"
+          - "freight mode"
+      - name: CARRIER_CODE
+        expr: CARRIER_CODE
+        data_type: VARCHAR
+        description: "Logistics provider identifier"
+        synonyms:
+          - "carrier"
+          - "logistics provider"
+      - name: SHIP_DATE
+        expr: SHIP_DATE
+        data_type: DATE
+        description: "Date goods departed origin"
+      - name: ESTIMATED_ARRIVAL_DATE
+        expr: ESTIMATED_ARRIVAL_DATE
+        data_type: DATE
+        description: "Predicted arrival at destination plant"
+        synonyms:
+          - "ETA"
+      - name: ACTUAL_ARRIVAL_DATE
+        expr: ACTUAL_ARRIVAL_DATE
+        data_type: DATE
+        description: "Confirmed arrival date. NULL if still in transit."
+      - name: SHIPMENT_STATUS
+        expr: SHIPMENT_STATUS
+        data_type: VARCHAR
+        description: "Current status: BOOKED, IN_TRANSIT, DELIVERED, DAMAGED, LOST"
+    facts:
+      - name: QUANTITY_SHIPPED
+        expr: QUANTITY_SHIPPED
+        data_type: NUMBER
+        description: "Quantity dispatched in this shipment"
+      - name: TRANSIT_DAYS
+        expr: "DATEDIFF('day', SHIP_DATE, COALESCE(ACTUAL_ARRIVAL_DATE, CURRENT_DATE()))"
+        data_type: NUMBER
+        description: "Actual or elapsed transit days. Do NOT SUM; use AVG for mode/carrier analysis."
+        synonyms:
+          - "days in transit"
+      - name: ARRIVAL_VARIANCE_DAYS
+        expr: "DATEDIFF('day', ESTIMATED_ARRIVAL_DATE, ACTUAL_ARRIVAL_DATE)"
+        data_type: NUMBER
+        description: "Days between ETA and actual arrival. Negative=early, Positive=late. NULL if in transit."
+
+  # ================================================================
+  # FACT: RECEIPTS
+  # ================================================================
+  - name: RECEIPTS
+    base_table:
+      database: OTIF_GUARDIAN
+      schema: RAW
+      table: RECEIPTS
+    description: >
+      Goods receipt and quality inspection fact. Each row is a receiving event
+      with inspection outcome.
+    synonyms:
+      - "goods receipts"
+      - "receiving"
+      - "inbound receipts"
+    dimensions:
+      - name: RECEIPT_ID
+        expr: RECEIPT_ID
+        data_type: NUMBER
+        description: "Internal surrogate key"
+        unique: true
+      - name: RECEIPT_NUMBER
+        expr: RECEIPT_NUMBER
+        data_type: VARCHAR
+        description: "Business identifier (RCV-XXXXXXXX)"
+      - name: RECEIPT_DATE
+        expr: RECEIPT_DATE
+        data_type: DATE
+        description: "Date of physical receipt at plant"
+      - name: INSPECTION_RESULT
+        expr: INSPECTION_RESULT
+        data_type: VARCHAR
+        description: "Quality gate outcome: ACCEPTED, CONDITIONAL, REJECTED"
+        synonyms:
+          - "quality result"
+          - "QC result"
+    facts:
+      - name: RECEIPT_QTY_RECEIVED
+        expr: QUANTITY_RECEIVED
+        data_type: NUMBER
+        description: "Physical count received at dock"
+      - name: QUANTITY_ACCEPTED
+        expr: QUANTITY_ACCEPTED
+        data_type: NUMBER
+        description: "Quantity passing quality inspection and added to available inventory"
+      - name: QUANTITY_REJECTED
+        expr: "QUANTITY_RECEIVED - QUANTITY_ACCEPTED"
+        data_type: NUMBER
+        description: "Quantity failing quality inspection"
+        synonyms:
+          - "rejected quantity"
+          - "scrap quantity"
+
+# ================================================================
+# RELATIONSHIPS (join paths)
+# ================================================================
+relationships:
+  - name: PO_LINES_TO_PURCHASE_ORDERS
+    left_table: PO_LINES
+    right_table: PURCHASE_ORDERS
+    join_type: inner
+    relationship_type: many_to_one
+    on:
+      - left_column: PO_ID
+        right_column: PO_ID
+    description: "Each PO line belongs to one purchase order header"
+
+  - name: PURCHASE_ORDERS_TO_SUPPLIERS
+    left_table: PURCHASE_ORDERS
+    right_table: SUPPLIERS
+    join_type: inner
+    relationship_type: many_to_one
+    on:
+      - left_column: SUPPLIER_ID
+        right_column: SUPPLIER_ID
+    description: "Each purchase order is issued to one supplier"
+
+  - name: PURCHASE_ORDERS_TO_PLANTS
+    left_table: PURCHASE_ORDERS
+    right_table: PLANTS
+    join_type: inner
+    relationship_type: many_to_one
+    on:
+      - left_column: PLANT_ID
+        right_column: PLANT_ID
+    description: "Each purchase order is destined for one plant"
+
+  - name: PO_LINES_TO_MATERIALS
+    left_table: PO_LINES
+    right_table: MATERIALS
+    join_type: inner
+    relationship_type: many_to_one
+    on:
+      - left_column: MATERIAL_ID
+        right_column: MATERIAL_ID
+    description: "Each PO line orders one material"
+
+  - name: SHIPMENTS_TO_PO_LINES
+    left_table: SHIPMENTS
+    right_table: PO_LINES
+    join_type: inner
+    relationship_type: many_to_one
+    on:
+      - left_column: PO_LINE_ID
+        right_column: PO_LINE_ID
+    description: "Each shipment fulfills a PO line (split shipments = many:1)"
+
+  - name: RECEIPTS_TO_SHIPMENTS
+    left_table: RECEIPTS
+    right_table: SHIPMENTS
+    join_type: inner
+    relationship_type: many_to_one
+    on:
+      - left_column: SHIPMENT_ID
+        right_column: SHIPMENT_ID
+    description: "Each receipt receives one shipment"
+
+  - name: RECEIPTS_TO_PLANTS
+    left_table: RECEIPTS
+    right_table: PLANTS
+    join_type: inner
+    relationship_type: many_to_one
+    on:
+      - left_column: PLANT_ID
+        right_column: PLANT_ID
+    description: "Each receipt occurs at one plant"
+
+  - name: INVENTORY_TO_MATERIALS
+    left_table: INVENTORY
+    right_table: MATERIALS
+    join_type: inner
+    relationship_type: many_to_one
+    on:
+      - left_column: MATERIAL_ID
+        right_column: MATERIAL_ID
+    description: "Each inventory record tracks one material"
+
+  - name: INVENTORY_TO_PLANTS
+    left_table: INVENTORY
+    right_table: PLANTS
+    join_type: inner
+    relationship_type: many_to_one
+    on:
+      - left_column: PLANT_ID
+        right_column: PLANT_ID
+    description: "Each inventory record is at one plant"
+
+  - name: DEMAND_TO_MATERIALS
+    left_table: DEMAND
+    right_table: MATERIALS
+    join_type: inner
+    relationship_type: many_to_one
+    on:
+      - left_column: MATERIAL_ID
+        right_column: MATERIAL_ID
+    description: "Each demand signal requires one material"
+
+  - name: DEMAND_TO_PLANTS
+    left_table: DEMAND
+    right_table: PLANTS
+    join_type: inner
+    relationship_type: many_to_one
+    on:
+      - left_column: PLANT_ID
+        right_column: PLANT_ID
+    description: "Each demand signal is at one plant"
+
+  - name: CUSTOMER_ORDERS_TO_PLANTS
+    left_table: CUSTOMER_ORDERS
+    right_table: PLANTS
+    join_type: inner
+    relationship_type: many_to_one
+    on:
+      - left_column: PLANT_ID
+        right_column: PLANT_ID
+    description: "Each customer order is fulfilled from one plant"
+
+# ================================================================
+# METRICS (pre-aggregated calculations preventing double-counting)
+# ================================================================
+metrics:
+  - name: SUPPLIER_OTD_RATE
+    expr: "COUNT_IF(IS_ON_TIME = TRUE) / NULLIF(COUNT_IF(IS_ON_TIME IS NOT NULL), 0) * 100"
+    base_table: PO_LINES
+    data_type: NUMBER
+    description: "Percentage of delivered PO lines arriving on or before promised date"
+    synonyms:
+      - "on-time delivery rate"
+      - "OTD %"
+      - "supplier on-time percentage"
+    default_aggregation: none
+
+  - name: IN_FULL_RATE
+    expr: "COUNT_IF(IS_IN_FULL = TRUE) / NULLIF(COUNT_IF(IS_IN_FULL IS NOT NULL), 0) * 100"
+    base_table: PO_LINES
+    data_type: NUMBER
+    description: "Percentage of closed PO lines received with full quantity"
+    synonyms:
+      - "fill rate"
+      - "in-full percentage"
+    default_aggregation: none
+
+  - name: INBOUND_OTIF_RATE
+    expr: "COUNT_IF(IS_OTIF = TRUE) / NULLIF(COUNT_IF(IS_OTIF IS NOT NULL), 0) * 100"
+    base_table: PO_LINES
+    data_type: NUMBER
+    description: "Percentage of PO lines delivered both on-time AND in-full"
+    synonyms:
+      - "supplier OTIF"
+      - "inbound OTIF"
+      - "procurement OTIF"
+    default_aggregation: none
+
+  - name: CUSTOMER_OTIF_RATE
+    expr: "COUNT_IF(CUSTOMER_OTIF_FLAG = TRUE) / NULLIF(COUNT_IF(CUSTOMER_OTIF_FLAG IS NOT NULL), 0) * 100"
+    base_table: CUSTOMER_ORDERS
+    data_type: NUMBER
+    description: "Percentage of customer orders shipped on-time AND in-full"
+    synonyms:
+      - "outbound OTIF"
+      - "customer service level"
+      - "OTIF rate"
+    default_aggregation: none
+
+  - name: TOTAL_REVENUE_AT_RISK
+    expr: "SUM(REVENUE_AT_RISK)"
+    base_table: CUSTOMER_ORDERS
+    data_type: NUMBER
+    description: "Total monetary value of customer orders that failed OTIF"
+    synonyms:
+      - "OTIF revenue impact"
+      - "at-risk revenue"
+    default_aggregation: none
+
+  - name: AVG_DELIVERY_VARIANCE
+    expr: "AVG(DELIVERY_VARIANCE_DAYS)"
+    base_table: PO_LINES
+    data_type: NUMBER
+    description: "Average days between promised and actual delivery. Positive = late."
+    synonyms:
+      - "average lateness"
+      - "mean delivery delay"
+    default_aggregation: none
+
+  - name: TOTAL_PO_LINE_VALUE
+    expr: "SUM(LINE_VALUE)"
+    base_table: PO_LINES
+    data_type: NUMBER
+    description: "Total procurement spend across PO lines"
+    synonyms:
+      - "total spend"
+      - "procurement value"
+    default_aggregation: none
+
+  - name: TOTAL_INVENTORY_VALUE
+    expr: "SUM(INVENTORY_VALUE)"
+    base_table: INVENTORY
+    data_type: NUMBER
+    description: "Total carrying value of inventory across all positions"
+    synonyms:
+      - "total stock value"
+      - "inventory investment"
+    default_aggregation: none
+
+  - name: STOCKOUT_COUNT
+    expr: "COUNT_IF(QTY_ON_HAND = 0)"
+    base_table: INVENTORY
+    data_type: NUMBER
+    description: "Number of material-plant positions with zero on-hand stock"
+    synonyms:
+      - "out of stock count"
+      - "zero stock count"
+    default_aggregation: none
+
+  - name: AVG_DAYS_OF_SUPPLY
+    expr: "AVG(DAYS_OF_SUPPLY)"
+    base_table: INVENTORY
+    data_type: NUMBER
+    description: "Average days of supply across inventory positions"
+    synonyms:
+      - "average coverage"
+      - "mean DOS"
+    default_aggregation: none
+
+  - name: TOTAL_DEMAND_QTY
+    expr: "SUM(QUANTITY_DEMANDED)"
+    base_table: DEMAND
+    data_type: NUMBER
+    description: "Total quantity demanded across all signals"
+    default_aggregation: none
+
+  - name: QUALITY_ACCEPTANCE_RATE
+    expr: "SUM(QUANTITY_ACCEPTED) / NULLIF(SUM(RECEIPT_QTY_RECEIVED), 0) * 100"
+    base_table: RECEIPTS
+    data_type: NUMBER
+    description: "Percentage of received quantity passing quality inspection"
+    synonyms:
+      - "acceptance rate"
+      - "quality pass rate"
+    default_aggregation: none
+
+  - name: CARRIER_ON_TIME_RATE
+    expr: "COUNT_IF(ACTUAL_ARRIVAL_DATE <= ESTIMATED_ARRIVAL_DATE) / NULLIF(COUNT_IF(ACTUAL_ARRIVAL_DATE IS NOT NULL), 0) * 100"
+    base_table: SHIPMENTS
+    data_type: NUMBER
+    description: "Percentage of shipments arriving on or before ETA"
+    synonyms:
+      - "carrier reliability"
+      - "transport on-time"
+    default_aggregation: none
+
+  - name: EXPEDITE_RATE
+    expr: "COUNT_IF(PO_TYPE = 'EXPEDITE') / NULLIF(COUNT(*), 0) * 100"
+    base_table: PURCHASE_ORDERS
+    data_type: NUMBER
+    description: "Percentage of purchase orders placed as expedite (indicator of planning failures)"
+    synonyms:
+      - "rush order rate"
+      - "emergency order percentage"
+    default_aggregation: none
+
+# ================================================================
+# VERIFIED QUERIES (VQRs)
+# ================================================================
+verified_queries:
+  - name: "overall_supplier_otif_rate"
+    question: "What is the overall supplier OTIF rate?"
+    verified_at: "2026-08-28"
+    verified_by: "SNOWRUBAN"
+    sql: |
+      SELECT
+        ROUND(COUNT_IF(
+          ACTUAL_DELIVERY_DATE IS NOT NULL
+          AND ACTUAL_DELIVERY_DATE <= PROMISED_DELIVERY_DATE
+          AND QUANTITY_RECEIVED >= QUANTITY_ORDERED
+        ) * 100.0 / NULLIF(COUNT_IF(
+          ACTUAL_DELIVERY_DATE IS NOT NULL
+          AND LINE_STATUS IN ('CLOSED','SHORT_CLOSED')
+        ), 0), 2) AS otif_rate_pct
+      FROM OTIF_GUARDIAN.RAW.PO_LINES
+
+  - name: "otif_rate_by_supplier"
+    question: "What is the OTIF rate by supplier?"
+    verified_at: "2026-08-28"
+    verified_by: "SNOWRUBAN"
+    sql: |
+      SELECT
+        s.SUPPLIER_CODE,
+        s.SUPPLIER_NAME,
+        s.SUPPLIER_TIER,
+        COUNT(*) AS total_lines,
+        ROUND(COUNT_IF(
+          pl.ACTUAL_DELIVERY_DATE <= pl.PROMISED_DELIVERY_DATE
+          AND pl.QUANTITY_RECEIVED >= pl.QUANTITY_ORDERED
+        ) * 100.0 / NULLIF(COUNT(*), 0), 2) AS otif_rate_pct
+      FROM OTIF_GUARDIAN.RAW.PO_LINES pl
+      JOIN OTIF_GUARDIAN.RAW.PURCHASE_ORDERS po ON pl.PO_ID = po.PO_ID
+      JOIN OTIF_GUARDIAN.RAW.SUPPLIERS s ON po.SUPPLIER_ID = s.SUPPLIER_ID
+      WHERE pl.ACTUAL_DELIVERY_DATE IS NOT NULL
+        AND pl.LINE_STATUS IN ('CLOSED','SHORT_CLOSED')
+      GROUP BY s.SUPPLIER_CODE, s.SUPPLIER_NAME, s.SUPPLIER_TIER
+      ORDER BY otif_rate_pct ASC
+
+  - name: "customer_otif_by_plant"
+    question: "What is the customer OTIF rate by plant?"
+    verified_at: "2026-08-28"
+    verified_by: "SNOWRUBAN"
+    sql: |
+      SELECT
+        p.PLANT_CODE,
+        p.PLANT_NAME,
+        COUNT(*) AS total_orders,
+        ROUND(COUNT_IF(OTIF_FLAG = TRUE) * 100.0
+          / NULLIF(COUNT_IF(OTIF_FLAG IS NOT NULL), 0), 2) AS otif_rate_pct,
+        SUM(CASE WHEN OTIF_FLAG = FALSE THEN ORDER_VALUE ELSE 0 END) AS revenue_at_risk
+      FROM OTIF_GUARDIAN.RAW.CUSTOMER_ORDERS co
+      JOIN OTIF_GUARDIAN.RAW.PLANTS p ON co.PLANT_ID = p.PLANT_ID
+      WHERE co.ORDER_STATUS IN ('SHIPPED','PARTIAL')
+      GROUP BY p.PLANT_CODE, p.PLANT_NAME
+      ORDER BY otif_rate_pct ASC
+
+  - name: "inventory_stockout_risk"
+    question: "Which materials are at stockout risk?"
+    verified_at: "2026-08-28"
+    verified_by: "SNOWRUBAN"
+    sql: |
+      SELECT
+        m.MATERIAL_CODE,
+        m.MATERIAL_NAME,
+        m.ABC_CLASS,
+        m.CRITICALITY,
+        p.PLANT_CODE,
+        i.QTY_ON_HAND,
+        i.DAYS_OF_SUPPLY,
+        m.SAFETY_STOCK_DAYS,
+        i.DAYS_OF_SUPPLY - m.SAFETY_STOCK_DAYS AS buffer_days
+      FROM OTIF_GUARDIAN.RAW.INVENTORY i
+      JOIN OTIF_GUARDIAN.RAW.MATERIALS m ON i.MATERIAL_ID = m.MATERIAL_ID
+      JOIN OTIF_GUARDIAN.RAW.PLANTS p ON i.PLANT_ID = p.PLANT_ID
+      WHERE i.DAYS_OF_SUPPLY < m.SAFETY_STOCK_DAYS
+      ORDER BY m.ABC_CLASS, buffer_days ASC
+
+  - name: "late_po_lines_at_risk"
+    question: "Which PO lines are overdue or at risk of being late?"
+    verified_at: "2026-08-28"
+    verified_by: "SNOWRUBAN"
+    sql: |
+      SELECT
+        po.PO_NUMBER,
+        s.SUPPLIER_NAME,
+        m.MATERIAL_CODE,
+        m.MATERIAL_NAME,
+        p.PLANT_CODE,
+        pl.PROMISED_DELIVERY_DATE,
+        DATEDIFF('day', pl.PROMISED_DELIVERY_DATE, CURRENT_DATE()) AS days_overdue,
+        pl.QUANTITY_ORDERED,
+        pl.LINE_STATUS
+      FROM OTIF_GUARDIAN.RAW.PO_LINES pl
+      JOIN OTIF_GUARDIAN.RAW.PURCHASE_ORDERS po ON pl.PO_ID = po.PO_ID
+      JOIN OTIF_GUARDIAN.RAW.SUPPLIERS s ON po.SUPPLIER_ID = s.SUPPLIER_ID
+      JOIN OTIF_GUARDIAN.RAW.MATERIALS m ON pl.MATERIAL_ID = m.MATERIAL_ID
+      JOIN OTIF_GUARDIAN.RAW.PLANTS p ON po.PLANT_ID = p.PLANT_ID
+      WHERE pl.LINE_STATUS IN ('OPEN','IN_TRANSIT','PARTIALLY_RECEIVED')
+        AND pl.PROMISED_DELIVERY_DATE <= CURRENT_DATE()
+      ORDER BY days_overdue DESC
+
+  - name: "top_spending_by_supplier"
+    question: "Who are our top suppliers by spend?"
+    verified_at: "2026-08-28"
+    verified_by: "SNOWRUBAN"
+    sql: |
+      SELECT
+        s.SUPPLIER_CODE,
+        s.SUPPLIER_NAME,
+        s.SUPPLIER_TIER,
+        s.REGION,
+        COUNT(DISTINCT po.PO_ID) AS po_count,
+        SUM(pl.QUANTITY_ORDERED * pl.UNIT_PRICE) AS total_spend
+      FROM OTIF_GUARDIAN.RAW.PO_LINES pl
+      JOIN OTIF_GUARDIAN.RAW.PURCHASE_ORDERS po ON pl.PO_ID = po.PO_ID
+      JOIN OTIF_GUARDIAN.RAW.SUPPLIERS s ON po.SUPPLIER_ID = s.SUPPLIER_ID
+      GROUP BY s.SUPPLIER_CODE, s.SUPPLIER_NAME, s.SUPPLIER_TIER, s.REGION
+      ORDER BY total_spend DESC
+      LIMIT 20
+
+  - name: "demand_supply_gap"
+    question: "Where are the demand-supply gaps?"
+    verified_at: "2026-08-28"
+    verified_by: "SNOWRUBAN"
+    sql: |
+      SELECT
+        m.MATERIAL_CODE,
+        m.MATERIAL_NAME,
+        m.ABC_CLASS,
+        p.PLANT_CODE,
+        d.DEMAND_DATE,
+        d.QUANTITY_DEMANDED,
+        COALESCE(i.QTY_ON_HAND - i.QTY_RESERVED, 0) AS qty_available,
+        d.QUANTITY_DEMANDED - COALESCE(i.QTY_ON_HAND - i.QTY_RESERVED, 0) AS gap_qty
+      FROM OTIF_GUARDIAN.RAW.DEMAND d
+      JOIN OTIF_GUARDIAN.RAW.MATERIALS m ON d.MATERIAL_ID = m.MATERIAL_ID
+      JOIN OTIF_GUARDIAN.RAW.PLANTS p ON d.PLANT_ID = p.PLANT_ID
+      LEFT JOIN OTIF_GUARDIAN.RAW.INVENTORY i
+        ON d.MATERIAL_ID = i.MATERIAL_ID AND d.PLANT_ID = i.PLANT_ID
+      WHERE d.DEMAND_TYPE = 'FIRM'
+        AND d.DEMAND_DATE BETWEEN CURRENT_DATE() AND DATEADD('day', 14, CURRENT_DATE())
+        AND d.QUANTITY_DEMANDED > COALESCE(i.QTY_ON_HAND - i.QTY_RESERVED, 0)
+      ORDER BY gap_qty DESC
+
+  - name: "monthly_otif_trend"
+    question: "What is the monthly OTIF trend?"
+    verified_at: "2026-08-28"
+    verified_by: "SNOWRUBAN"
+    sql: |
+      SELECT
+        DATE_TRUNC('month', ACTUAL_DELIVERY_DATE) AS month,
+        COUNT(*) AS total_delivered,
+        ROUND(COUNT_IF(
+          ACTUAL_DELIVERY_DATE <= PROMISED_DELIVERY_DATE
+          AND QUANTITY_RECEIVED >= QUANTITY_ORDERED
+        ) * 100.0 / NULLIF(COUNT(*), 0), 2) AS otif_rate_pct
+      FROM OTIF_GUARDIAN.RAW.PO_LINES
+      WHERE ACTUAL_DELIVERY_DATE IS NOT NULL
+        AND ACTUAL_DELIVERY_DATE >= DATEADD('month', -12, CURRENT_DATE())
+      GROUP BY DATE_TRUNC('month', ACTUAL_DELIVERY_DATE)
+      ORDER BY month
+
+  - name: "carrier_performance"
+    question: "How are carriers performing on delivery reliability?"
+    verified_at: "2026-08-28"
+    verified_by: "SNOWRUBAN"
+    sql: |
+      SELECT
+        CARRIER_CODE,
+        TRANSPORT_MODE,
+        COUNT(*) AS total_shipments,
+        ROUND(AVG(DATEDIFF('day', SHIP_DATE, ACTUAL_ARRIVAL_DATE)), 1) AS avg_transit_days,
+        ROUND(COUNT_IF(ACTUAL_ARRIVAL_DATE <= ESTIMATED_ARRIVAL_DATE) * 100.0
+          / NULLIF(COUNT(*), 0), 2) AS on_time_pct
+      FROM OTIF_GUARDIAN.RAW.SHIPMENTS
+      WHERE ACTUAL_ARRIVAL_DATE IS NOT NULL
+      GROUP BY CARRIER_CODE, TRANSPORT_MODE
+      ORDER BY on_time_pct ASC

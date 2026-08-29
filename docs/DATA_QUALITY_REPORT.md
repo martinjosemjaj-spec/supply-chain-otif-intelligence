@@ -95,7 +95,20 @@ TRANSPORT_LANES
 | Line Quantity | Log-normal | 10 - 50,000 units |
 | Line Status (hist) | Weighted | CLOSED: 90%, SHORT_CLOSED: 5%, CANCELLED: 5% |
 | Line Status (active) | Uniform | OPEN, PARTIALLY_RECEIVED, IN_TRANSIT |
-| Delivery Variance | Normal-like | -5 to +9 days from promised |
+| **Line Outcome** | **Bucketed** | **See outcome distribution below** |
+
+**PO Line Outcome Distribution (historical lines only):**
+
+Each historical PO line is assigned to one of four outcome buckets via `MOD(HASH(line_id, 4001), 100)`. The bucket jointly determines both delivery variance and fill rate, creating realistic correlation between the two dimensions:
+
+| Bucket | % of Lines | Delivery Variance | Fill Rate | Description |
+|--------|-----------|-------------------|-----------|-------------|
+| Clean | 90% | -5 to 0 days (early/on-time) | 100% | Normal operations |
+| Late only | 6% | +1 to +10 days late | 100% | Delivery delay, full quantity |
+| Short only | 3% | -5 to 0 days (on-time) | 70-94% | On-time but under-shipped |
+| Both | 1% | +5 to +19 days late | 50-79% | Worst case: late AND short |
+
+This produces an expected OTIF rate of ~90% (lines that are both on-time AND in-full), with a right-skewed delivery variance distribution (peak at 0, long thin tail).
 
 ### Shipments
 | Attribute | Distribution | Values |
@@ -147,7 +160,7 @@ TRANSPORT_LANES
 ### Consistency
 | Check | Status | Notes |
 |-------|--------|-------|
-| qty_received <= qty_ordered | PASS | Bounded to 90-105% for historical |
+| qty_received <= qty_ordered | PASS | 96% at 100%, 3% at 70-94%, 1% at 50-79% (historical) |
 | actual_date NULL when status=OPEN | PASS | Conditional logic ensures alignment |
 | OTIF flag aligned with dates | PASS | TRUE only when ship variance <= 0 AND status != PARTIAL |
 | Inventory reserved <= on_hand | PASS | Reserved capped at 40% of on-hand |
@@ -186,7 +199,7 @@ TRANSPORT_LANES
 
 5. **Determinism** - All randomness uses `HASH(key, seed)` with fixed integer seeds. Re-running the script on the same Snowflake version produces identical data.
 
-6. **OTIF rate** - The derived OTIF flag shows ~30-40% true, which is deliberately below world-class (~95%) to provide meaningful signal for the monitoring system to detect and improve.
+6. **OTIF rate** - The outcome-bucketed distribution produces ~90% OTIF (on-time AND in-full), with 6% late-only, 3% short-only, and 1% both late and short. The right-skewed delivery variance has a peak near 0 days and a long thin tail out to +19 days.
 
 ---
 

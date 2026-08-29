@@ -261,16 +261,26 @@ SELECT
         POWER(10, 0.5 + (MOD(HASH(1 + MOD(HASH(s.line_id, 3101), 250), 1401), 350) / 100.0)) * 0.05
         * (0.85 + MOD(HASH(s.line_id, 3301), 30) / 100.0),
     2) AS unit_price,
-    -- Quantity received (for historical: 90-105% fill; for active: 0-partial)
+    -- Quantity received (outcome-bucketed: 90% clean, 6% late-only, 3% short, 1% both)
     CASE
         WHEN MOD(HASH(s.line_id, 3001), 6400) > 6000 THEN
             -- Active lines: 0-70% received
             FLOOR(GREATEST(10, FLOOR(POWER(10, 1 + (MOD(HASH(s.line_id, 3201), 370) / 100.0)) * 0.1))
                 * MOD(HASH(s.line_id, 3401), 70) / 100.0)::INTEGER
-        ELSE
-            -- Historical: most fully received, some partial
+        WHEN MOD(HASH(s.line_id, 4001), 100) < 90 THEN
+            -- 90% clean: fully filled
+            GREATEST(10, FLOOR(POWER(10, 1 + (MOD(HASH(s.line_id, 3201), 370) / 100.0)) * 0.1))::INTEGER
+        WHEN MOD(HASH(s.line_id, 4001), 100) < 96 THEN
+            -- 6% late-only: fully filled
+            GREATEST(10, FLOOR(POWER(10, 1 + (MOD(HASH(s.line_id, 3201), 370) / 100.0)) * 0.1))::INTEGER
+        WHEN MOD(HASH(s.line_id, 4001), 100) < 99 THEN
+            -- 3% short-shipped only: 70-94% fill
             FLOOR(GREATEST(10, FLOOR(POWER(10, 1 + (MOD(HASH(s.line_id, 3201), 370) / 100.0)) * 0.1))
-                * (90 + MOD(HASH(s.line_id, 3501), 15)) / 100.0)::INTEGER
+                * (70 + MOD(HASH(s.line_id, 3903), 25)) / 100.0)::INTEGER
+        ELSE
+            -- 1% both late AND short: 50-79% fill
+            FLOOR(GREATEST(10, FLOOR(POWER(10, 1 + (MOD(HASH(s.line_id, 3201), 370) / 100.0)) * 0.1))
+                * (50 + MOD(HASH(s.line_id, 3903), 30)) / 100.0)::INTEGER
     END AS quantity_received,
     -- Line status
     CASE
@@ -296,17 +306,49 @@ SELECT
             '2026-08-28'::DATE
         )
     ) AS promised_delivery_date,
-    -- Actual delivery date (NULL for open lines)
+    -- Actual delivery date (outcome-bucketed: matches quantity_received logic)
     CASE
         WHEN MOD(HASH(s.line_id, 3001), 6400) > 6000 THEN NULL
-        ELSE DATEADD('day',
-            14 + MOD(HASH(s.line_id, 3801), 45)
-            + (MOD(HASH(s.line_id, 3901), 15) - 5),  -- -5 to +9 days variance
+        WHEN MOD(HASH(s.line_id, 4001), 100) < 90 THEN
+            -- 90% clean: early/on-time (-5 to 0 days)
             DATEADD('day',
-                -1 * GREATEST(0, FLOOR(POWER(MOD(HASH(1 + MOD(HASH(s.line_id, 3001), 6400), 2201), 1000) / 1000.0, 0.5) * 1095)),
-                '2026-08-28'::DATE
+                14 + MOD(HASH(s.line_id, 3801), 45)
+                + (MOD(HASH(s.line_id, 3901), 6) - 5),
+                DATEADD('day',
+                    -1 * GREATEST(0, FLOOR(POWER(MOD(HASH(1 + MOD(HASH(s.line_id, 3001), 6400), 2201), 1000) / 1000.0, 0.5) * 1095)),
+                    '2026-08-28'::DATE
+                )
             )
-        )
+        WHEN MOD(HASH(s.line_id, 4001), 100) < 96 THEN
+            -- 6% late-only: 1 to 10 days late
+            DATEADD('day',
+                14 + MOD(HASH(s.line_id, 3801), 45)
+                + (1 + MOD(HASH(s.line_id, 3902), 10)),
+                DATEADD('day',
+                    -1 * GREATEST(0, FLOOR(POWER(MOD(HASH(1 + MOD(HASH(s.line_id, 3001), 6400), 2201), 1000) / 1000.0, 0.5) * 1095)),
+                    '2026-08-28'::DATE
+                )
+            )
+        WHEN MOD(HASH(s.line_id, 4001), 100) < 99 THEN
+            -- 3% short-shipped only: still on-time (-5 to 0 days)
+            DATEADD('day',
+                14 + MOD(HASH(s.line_id, 3801), 45)
+                + (MOD(HASH(s.line_id, 3901), 6) - 5),
+                DATEADD('day',
+                    -1 * GREATEST(0, FLOOR(POWER(MOD(HASH(1 + MOD(HASH(s.line_id, 3001), 6400), 2201), 1000) / 1000.0, 0.5) * 1095)),
+                    '2026-08-28'::DATE
+                )
+            )
+        ELSE
+            -- 1% both late AND short: 5 to 19 days late
+            DATEADD('day',
+                14 + MOD(HASH(s.line_id, 3801), 45)
+                + (5 + MOD(HASH(s.line_id, 3902), 15)),
+                DATEADD('day',
+                    -1 * GREATEST(0, FLOOR(POWER(MOD(HASH(1 + MOD(HASH(s.line_id, 3001), 6400), 2201), 1000) / 1000.0, 0.5) * 1095)),
+                    '2026-08-28'::DATE
+                )
+            )
     END AS actual_delivery_date,
     CURRENT_TIMESTAMP() AS created_at
 FROM seed_data s;

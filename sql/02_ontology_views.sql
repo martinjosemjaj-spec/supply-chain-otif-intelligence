@@ -251,11 +251,14 @@ SELECT
         THEN DATEDIFF('day', pl.promised_delivery_date, pl.actual_delivery_date)
     END AS delivery_variance_days,
     -- OTIF flags
+    -- is_on_time: only evaluated for CLOSED/SHORT_CLOSED lines with delivery data
     CASE
-        WHEN pl.actual_delivery_date IS NOT NULL
+        WHEN pl.line_status IN ('CLOSED', 'SHORT_CLOSED')
+             AND pl.actual_delivery_date IS NOT NULL
              AND pl.actual_delivery_date <= pl.promised_delivery_date
         THEN TRUE
-        WHEN pl.actual_delivery_date IS NOT NULL
+        WHEN pl.line_status IN ('CLOSED', 'SHORT_CLOSED')
+             AND pl.actual_delivery_date IS NOT NULL
         THEN FALSE
         ELSE NULL
     END AS is_on_time,
@@ -267,13 +270,18 @@ SELECT
         THEN FALSE
         ELSE NULL
     END AS is_in_full,
+    -- is_otif: only CLOSED and SHORT_CLOSED lines are evaluated.
+    -- CANCELLED lines are always excluded (NULL) even if they have delivery
+    -- data, because a cancellation means the line was never actually fulfilled.
+    -- OPEN, IN_TRANSIT, and PARTIALLY_RECEIVED are also excluded (not yet complete).
     CASE
-        WHEN pl.actual_delivery_date IS NOT NULL
+        WHEN pl.line_status IN ('CLOSED', 'SHORT_CLOSED')
+             AND pl.actual_delivery_date IS NOT NULL
              AND pl.actual_delivery_date <= pl.promised_delivery_date
              AND pl.quantity_received >= pl.quantity_ordered
         THEN TRUE
-        WHEN pl.actual_delivery_date IS NOT NULL
-             AND pl.line_status IN ('CLOSED', 'SHORT_CLOSED')
+        WHEN pl.line_status IN ('CLOSED', 'SHORT_CLOSED')
+             AND pl.actual_delivery_date IS NOT NULL
         THEN FALSE
         ELSE NULL
     END AS is_otif,

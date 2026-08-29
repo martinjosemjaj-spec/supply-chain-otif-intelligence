@@ -64,15 +64,37 @@
 1. Add feature computation to `V_FEATURE_SET` in `sql/04_ml_pipeline.sql`
 2. Verify no leakage: feature must be knowable at PO creation time
 3. Add leakage test to `tests/test_ml.sql`
-4. Retrain model (creates new version in registry)
-5. Evaluate on test set — compare metrics to prior version
-6. Update `docs/MODEL_CARD.md` with new feature documentation
+4. Rebuild feature tables (see warning below)
+5. Retrain model (creates new version in registry)
+6. Evaluate on test set — compare metrics to prior version
+7. Update `docs/MODEL_CARD.md` with new feature documentation
 
 **Leakage checklist:**
 - Does this feature use `actual_delivery_date`? REJECT
 - Does this feature use `quantity_received`? REJECT
 - Does this feature use any shipment or receipt data? REJECT
 - Is this feature computed using data that exists AFTER the PO's order_date? REJECT
+
+### Stale feature table warning
+
+`TRAIN_DATA`, `TEST_DATA`, and `SCORE_DATA` are **materialized snapshots** of `V_FEATURE_SET`, not live views. Any change to base tables they depend on (SUPPLIERS, MATERIALS, PO_LINES, SHIPMENTS, PURCHASE_ORDERS, PLANTS, ALTERNATE_SUPPLIERS, DEMAND) will **not** propagate automatically. You must rebuild all three tables before retraining:
+
+```sql
+CREATE OR REPLACE TABLE OTIF_GUARDIAN.ML.TRAIN_DATA AS
+SELECT * EXCLUDE (po_id, po_line_id, order_date, promised_delivery_date)
+FROM OTIF_GUARDIAN.ML.V_FEATURE_SET
+WHERE OTIF_BREACH IS NOT NULL AND order_date < '2026-06-01'::DATE;
+
+CREATE OR REPLACE TABLE OTIF_GUARDIAN.ML.TEST_DATA AS
+SELECT * EXCLUDE (po_id, po_line_id, order_date, promised_delivery_date)
+FROM OTIF_GUARDIAN.ML.V_FEATURE_SET
+WHERE OTIF_BREACH IS NOT NULL AND order_date >= '2026-06-01'::DATE;
+
+CREATE OR REPLACE TABLE OTIF_GUARDIAN.ML.SCORE_DATA AS
+SELECT * FROM OTIF_GUARDIAN.ML.V_FEATURE_SET WHERE OTIF_BREACH IS NULL;
+```
+
+Skipping this step means the model trains and scores on stale data — the resulting `SCORED_PO_LINES` will silently reflect old feature values even though the underlying tables have changed.
 
 ## Adding a New Recovery Action
 

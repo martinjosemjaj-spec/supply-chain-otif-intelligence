@@ -115,8 +115,21 @@ This produces an expected OTIF rate of ~90% (lines that are both on-time AND in-
 |-----------|-------------|--------|
 | Transport Mode | Weighted | OCEAN: 40%, TRUCK: 20%, AIR: 20%, RAIL: 20% |
 | Transit Time | Mode-based | AIR: 3-7d, TRUCK: 2-8d, RAIL: 7-16d, OCEAN: 21-40d |
-| Arrival Variance | Offset | -1 to +3 days |
+| **Arrival Variance** | **Bucketed** | **See shipment outcome distribution below** |
 | Status | Time-based | DELIVERED (past ETA), IN_TRANSIT (future ETA), DAMAGED: 2% |
+
+**Shipment Arrival Outcome Distribution (delivered shipments only):**
+
+Each delivered shipment is assigned to one of four outcome buckets via `MOD(HASH(shipment_id, 4501), 100)`:
+
+| Bucket | % of Shipments | Arrival Variance | Description |
+|--------|---------------|------------------|-------------|
+| On-time/early | 85% | -2 to 0 days | Normal operations |
+| Slightly late | 10% | +1 to +3 days | Minor delay |
+| Late | 4% | +4 to +8 days | Significant delay |
+| Very late | 1% | +9 to +15 days | Severe delay (long tail) |
+
+This produces a carrier on-time rate of ~85% (DELIVERED shipments arriving on or before ETA), with a right-skewed arrival variance distribution.
 
 ### Receipts
 | Attribute | Distribution | Values |

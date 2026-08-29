@@ -392,7 +392,8 @@ SELECT
           END,
         '2026-08-28'::DATE
     ) AS estimated_arrival_date,
-    -- Actual arrival (NULL for in-transit)
+    -- Actual arrival (NULL for in-transit; outcome-bucketed variance for delivered)
+    -- 85% on-time/early (-2 to 0), 10% slightly late (1-3), 4% late (4-8), 1% very late (9-15)
     CASE
         WHEN DATEADD('day',
             -1 * MOD(HASH(s.shipment_id, 4301), 1000)
@@ -405,18 +406,62 @@ SELECT
               END,
             '2026-08-28'::DATE
         ) > '2026-08-28'::DATE THEN NULL
-        ELSE DATEADD('day',
-            -1 * MOD(HASH(s.shipment_id, 4301), 1000)
-            + CASE MOD(HASH(s.shipment_id, 4101), 5)
-                WHEN 0 THEN 3 + MOD(HASH(s.shipment_id, 4401), 5)
-                WHEN 1 THEN 21 + MOD(HASH(s.shipment_id, 4401), 20)
-                WHEN 2 THEN 21 + MOD(HASH(s.shipment_id, 4401), 20)
-                WHEN 3 THEN 2 + MOD(HASH(s.shipment_id, 4401), 7)
-                WHEN 4 THEN 7 + MOD(HASH(s.shipment_id, 4401), 10)
-              END
-            + (MOD(HASH(s.shipment_id, 4501), 5) - 1),  -- -1 to +3 days variance
-            '2026-08-28'::DATE
-        )
+        WHEN MOD(HASH(s.shipment_id, 4501), 100) < 85 THEN
+            -- 85% on-time/early: -2 to 0 days
+            DATEADD('day',
+                -1 * MOD(HASH(s.shipment_id, 4301), 1000)
+                + CASE MOD(HASH(s.shipment_id, 4101), 5)
+                    WHEN 0 THEN 3 + MOD(HASH(s.shipment_id, 4401), 5)
+                    WHEN 1 THEN 21 + MOD(HASH(s.shipment_id, 4401), 20)
+                    WHEN 2 THEN 21 + MOD(HASH(s.shipment_id, 4401), 20)
+                    WHEN 3 THEN 2 + MOD(HASH(s.shipment_id, 4401), 7)
+                    WHEN 4 THEN 7 + MOD(HASH(s.shipment_id, 4401), 10)
+                  END
+                + (MOD(HASH(s.shipment_id, 4502), 3) - 2),
+                '2026-08-28'::DATE
+            )
+        WHEN MOD(HASH(s.shipment_id, 4501), 100) < 95 THEN
+            -- 10% slightly late: 1-3 days
+            DATEADD('day',
+                -1 * MOD(HASH(s.shipment_id, 4301), 1000)
+                + CASE MOD(HASH(s.shipment_id, 4101), 5)
+                    WHEN 0 THEN 3 + MOD(HASH(s.shipment_id, 4401), 5)
+                    WHEN 1 THEN 21 + MOD(HASH(s.shipment_id, 4401), 20)
+                    WHEN 2 THEN 21 + MOD(HASH(s.shipment_id, 4401), 20)
+                    WHEN 3 THEN 2 + MOD(HASH(s.shipment_id, 4401), 7)
+                    WHEN 4 THEN 7 + MOD(HASH(s.shipment_id, 4401), 10)
+                  END
+                + (1 + MOD(HASH(s.shipment_id, 4503), 3)),
+                '2026-08-28'::DATE
+            )
+        WHEN MOD(HASH(s.shipment_id, 4501), 100) < 99 THEN
+            -- 4% late: 4-8 days
+            DATEADD('day',
+                -1 * MOD(HASH(s.shipment_id, 4301), 1000)
+                + CASE MOD(HASH(s.shipment_id, 4101), 5)
+                    WHEN 0 THEN 3 + MOD(HASH(s.shipment_id, 4401), 5)
+                    WHEN 1 THEN 21 + MOD(HASH(s.shipment_id, 4401), 20)
+                    WHEN 2 THEN 21 + MOD(HASH(s.shipment_id, 4401), 20)
+                    WHEN 3 THEN 2 + MOD(HASH(s.shipment_id, 4401), 7)
+                    WHEN 4 THEN 7 + MOD(HASH(s.shipment_id, 4401), 10)
+                  END
+                + (4 + MOD(HASH(s.shipment_id, 4504), 5)),
+                '2026-08-28'::DATE
+            )
+        ELSE
+            -- 1% very late: 9-15 days
+            DATEADD('day',
+                -1 * MOD(HASH(s.shipment_id, 4301), 1000)
+                + CASE MOD(HASH(s.shipment_id, 4101), 5)
+                    WHEN 0 THEN 3 + MOD(HASH(s.shipment_id, 4401), 5)
+                    WHEN 1 THEN 21 + MOD(HASH(s.shipment_id, 4401), 20)
+                    WHEN 2 THEN 21 + MOD(HASH(s.shipment_id, 4401), 20)
+                    WHEN 3 THEN 2 + MOD(HASH(s.shipment_id, 4401), 7)
+                    WHEN 4 THEN 7 + MOD(HASH(s.shipment_id, 4401), 10)
+                  END
+                + (9 + MOD(HASH(s.shipment_id, 4505), 7)),
+                '2026-08-28'::DATE
+            )
     END AS actual_arrival_date,
     CASE
         WHEN DATEADD('day',

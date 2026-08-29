@@ -305,17 +305,17 @@ tables:
           - "delivery date"
           - "arrival date"
       - name: IS_ON_TIME
-        expr: "CASE WHEN ACTUAL_DELIVERY_DATE IS NOT NULL AND ACTUAL_DELIVERY_DATE <= PROMISED_DELIVERY_DATE THEN TRUE WHEN ACTUAL_DELIVERY_DATE IS NOT NULL THEN FALSE ELSE NULL END"
+        expr: "CASE WHEN LINE_STATUS IN ('CLOSED','SHORT_CLOSED') AND ACTUAL_DELIVERY_DATE IS NOT NULL AND ACTUAL_DELIVERY_DATE <= PROMISED_DELIVERY_DATE THEN TRUE WHEN LINE_STATUS IN ('CLOSED','SHORT_CLOSED') AND ACTUAL_DELIVERY_DATE IS NOT NULL THEN FALSE ELSE NULL END"
         data_type: BOOLEAN
-        description: "TRUE if delivered on or before promised date. NULL if not yet delivered."
+        description: "TRUE if delivered on or before promised date. Only evaluated for CLOSED/SHORT_CLOSED lines; CANCELLED and open lines are always NULL."
       - name: IS_IN_FULL
         expr: "CASE WHEN LINE_STATUS = 'CLOSED' AND QUANTITY_RECEIVED >= QUANTITY_ORDERED THEN TRUE WHEN LINE_STATUS IN ('CLOSED','SHORT_CLOSED') THEN FALSE ELSE NULL END"
         data_type: BOOLEAN
-        description: "TRUE if full quantity received. NULL if line still open."
+        description: "TRUE if full quantity received. Only evaluated for CLOSED/SHORT_CLOSED lines."
       - name: IS_OTIF
-        expr: "CASE WHEN ACTUAL_DELIVERY_DATE IS NOT NULL AND ACTUAL_DELIVERY_DATE <= PROMISED_DELIVERY_DATE AND QUANTITY_RECEIVED >= QUANTITY_ORDERED THEN TRUE WHEN ACTUAL_DELIVERY_DATE IS NOT NULL AND LINE_STATUS IN ('CLOSED','SHORT_CLOSED') THEN FALSE ELSE NULL END"
+        expr: "CASE WHEN LINE_STATUS IN ('CLOSED','SHORT_CLOSED') AND ACTUAL_DELIVERY_DATE IS NOT NULL AND ACTUAL_DELIVERY_DATE <= PROMISED_DELIVERY_DATE AND QUANTITY_RECEIVED >= QUANTITY_ORDERED THEN TRUE WHEN LINE_STATUS IN ('CLOSED','SHORT_CLOSED') AND ACTUAL_DELIVERY_DATE IS NOT NULL THEN FALSE ELSE NULL END"
         data_type: BOOLEAN
-        description: "TRUE if both on-time AND in-full. NULL if line still open."
+        description: "TRUE if both on-time AND in-full. Only evaluated for CLOSED/SHORT_CLOSED lines; CANCELLED and open lines are always NULL."
         synonyms:
           - "OTIF flag"
           - "on time in full"
@@ -364,6 +364,54 @@ tables:
   # ================================================================
   # FACT: PURCHASE ORDERS (header)
   # ================================================================
+    metrics:
+      - name: SUPPLIER_OTD_RATE
+        expr: "COUNT_IF(IS_ON_TIME = TRUE) / NULLIF(COUNT_IF(IS_ON_TIME IS NOT NULL), 0) * 100"
+        data_type: NUMBER
+        description: "Percentage of delivered PO lines arriving on or before promised date"
+        synonyms:
+          - "on-time delivery rate"
+          - "OTD %"
+          - "supplier on-time percentage"
+        default_aggregation: none
+
+      - name: IN_FULL_RATE
+        expr: "COUNT_IF(IS_IN_FULL = TRUE) / NULLIF(COUNT_IF(IS_IN_FULL IS NOT NULL), 0) * 100"
+        data_type: NUMBER
+        description: "Percentage of closed PO lines received with full quantity"
+        synonyms:
+          - "fill rate"
+          - "in-full percentage"
+        default_aggregation: none
+
+      - name: INBOUND_OTIF_RATE
+        expr: "COUNT_IF(IS_OTIF = TRUE) / NULLIF(COUNT_IF(IS_OTIF IS NOT NULL), 0) * 100"
+        data_type: NUMBER
+        description: "Percentage of PO lines delivered both on-time AND in-full"
+        synonyms:
+          - "supplier OTIF"
+          - "inbound OTIF"
+          - "procurement OTIF"
+        default_aggregation: none
+
+      - name: AVG_DELIVERY_VARIANCE
+        expr: "AVG(DELIVERY_VARIANCE_DAYS)"
+        data_type: NUMBER
+        description: "Average days between promised and actual delivery. Positive = late."
+        synonyms:
+          - "average lateness"
+          - "mean delivery delay"
+        default_aggregation: none
+
+      - name: TOTAL_PO_LINE_VALUE
+        expr: "SUM(LINE_VALUE)"
+        data_type: NUMBER
+        description: "Total procurement spend across PO lines"
+        synonyms:
+          - "total spend"
+          - "procurement value"
+        default_aggregation: none
+
   - name: PURCHASE_ORDERS
     base_table:
       database: OTIF_GUARDIAN
@@ -421,6 +469,16 @@ tables:
   # ================================================================
   # FACT: CUSTOMER ORDERS (outbound OTIF)
   # ================================================================
+    metrics:
+      - name: EXPEDITE_RATE
+        expr: "COUNT_IF(PO_TYPE = 'EXPEDITE') / NULLIF(COUNT(*), 0) * 100"
+        data_type: NUMBER
+        description: "Percentage of purchase orders placed as expedite (indicator of planning failures)"
+        synonyms:
+          - "rush order rate"
+          - "emergency order percentage"
+        default_aggregation: none
+
   - name: CUSTOMER_ORDERS
     base_table:
       database: OTIF_GUARDIAN
@@ -516,6 +574,26 @@ tables:
   # ================================================================
   # FACT: INVENTORY
   # ================================================================
+    metrics:
+      - name: CUSTOMER_OTIF_RATE
+        expr: "COUNT_IF(CUSTOMER_OTIF_FLAG = TRUE) / NULLIF(COUNT_IF(CUSTOMER_OTIF_FLAG IS NOT NULL), 0) * 100"
+        data_type: NUMBER
+        description: "Percentage of customer orders shipped on-time AND in-full"
+        synonyms:
+          - "outbound OTIF"
+          - "customer service level"
+          - "OTIF rate"
+        default_aggregation: none
+
+      - name: TOTAL_REVENUE_AT_RISK
+        expr: "SUM(REVENUE_AT_RISK)"
+        data_type: NUMBER
+        description: "Total monetary value of customer orders that failed OTIF"
+        synonyms:
+          - "OTIF revenue impact"
+          - "at-risk revenue"
+        default_aggregation: none
+
   - name: INVENTORY
     base_table:
       database: OTIF_GUARDIAN
@@ -602,6 +680,34 @@ tables:
   # ================================================================
   # FACT: DEMAND
   # ================================================================
+    metrics:
+      - name: TOTAL_INVENTORY_VALUE
+        expr: "SUM(INVENTORY_VALUE)"
+        data_type: NUMBER
+        description: "Total carrying value of inventory across all positions"
+        synonyms:
+          - "total stock value"
+          - "inventory investment"
+        default_aggregation: none
+
+      - name: STOCKOUT_COUNT
+        expr: "COUNT_IF(QTY_ON_HAND = 0)"
+        data_type: NUMBER
+        description: "Number of material-plant positions with zero on-hand stock"
+        synonyms:
+          - "out of stock count"
+          - "zero stock count"
+        default_aggregation: none
+
+      - name: AVG_DAYS_OF_SUPPLY
+        expr: "AVG(DAYS_OF_SUPPLY)"
+        data_type: NUMBER
+        description: "Average days of supply across inventory positions"
+        synonyms:
+          - "average coverage"
+          - "mean DOS"
+        default_aggregation: none
+
   - name: DEMAND
     base_table:
       database: OTIF_GUARDIAN
@@ -655,6 +761,13 @@ tables:
   # ================================================================
   # FACT: SHIPMENTS
   # ================================================================
+    metrics:
+      - name: TOTAL_DEMAND_QTY
+        expr: "SUM(QUANTITY_DEMANDED)"
+        data_type: NUMBER
+        description: "Total quantity demanded across all signals"
+        default_aggregation: none
+
   - name: SHIPMENTS
     base_table:
       database: OTIF_GUARDIAN
@@ -729,6 +842,16 @@ tables:
   # ================================================================
   # FACT: RECEIPTS
   # ================================================================
+    metrics:
+      - name: CARRIER_ON_TIME_RATE
+        expr: "COUNT_IF(ACTUAL_ARRIVAL_DATE <= ESTIMATED_ARRIVAL_DATE) / NULLIF(COUNT_IF(ACTUAL_ARRIVAL_DATE IS NOT NULL), 0) * 100"
+        data_type: NUMBER
+        description: "Percentage of shipments arriving on or before ETA"
+        synonyms:
+          - "carrier reliability"
+          - "transport on-time"
+        default_aggregation: none
+
   - name: RECEIPTS
     base_table:
       database: OTIF_GUARDIAN
@@ -778,6 +901,16 @@ tables:
         synonyms:
           - "rejected quantity"
           - "scrap quantity"
+    metrics:
+      - name: QUALITY_ACCEPTANCE_RATE
+        expr: "SUM(QUANTITY_ACCEPTED) / NULLIF(SUM(RECEIPT_QTY_RECEIVED), 0) * 100"
+        data_type: NUMBER
+        description: "Percentage of received quantity passing quality inspection"
+        synonyms:
+          - "acceptance rate"
+          - "quality pass rate"
+        default_aggregation: none
+
 
 # ================================================================
 # RELATIONSHIPS (join paths)
@@ -786,9 +919,7 @@ relationships:
   - name: PO_LINES_TO_PURCHASE_ORDERS
     left_table: PO_LINES
     right_table: PURCHASE_ORDERS
-    join_type: inner
-    relationship_type: many_to_one
-    on:
+    relationship_columns:
       - left_column: PO_ID
         right_column: PO_ID
     description: "Each PO line belongs to one purchase order header"
@@ -796,9 +927,7 @@ relationships:
   - name: PURCHASE_ORDERS_TO_SUPPLIERS
     left_table: PURCHASE_ORDERS
     right_table: SUPPLIERS
-    join_type: inner
-    relationship_type: many_to_one
-    on:
+    relationship_columns:
       - left_column: SUPPLIER_ID
         right_column: SUPPLIER_ID
     description: "Each purchase order is issued to one supplier"
@@ -806,9 +935,7 @@ relationships:
   - name: PURCHASE_ORDERS_TO_PLANTS
     left_table: PURCHASE_ORDERS
     right_table: PLANTS
-    join_type: inner
-    relationship_type: many_to_one
-    on:
+    relationship_columns:
       - left_column: PLANT_ID
         right_column: PLANT_ID
     description: "Each purchase order is destined for one plant"
@@ -816,9 +943,7 @@ relationships:
   - name: PO_LINES_TO_MATERIALS
     left_table: PO_LINES
     right_table: MATERIALS
-    join_type: inner
-    relationship_type: many_to_one
-    on:
+    relationship_columns:
       - left_column: MATERIAL_ID
         right_column: MATERIAL_ID
     description: "Each PO line orders one material"
@@ -826,9 +951,7 @@ relationships:
   - name: SHIPMENTS_TO_PO_LINES
     left_table: SHIPMENTS
     right_table: PO_LINES
-    join_type: inner
-    relationship_type: many_to_one
-    on:
+    relationship_columns:
       - left_column: PO_LINE_ID
         right_column: PO_LINE_ID
     description: "Each shipment fulfills a PO line (split shipments = many:1)"
@@ -836,9 +959,7 @@ relationships:
   - name: RECEIPTS_TO_SHIPMENTS
     left_table: RECEIPTS
     right_table: SHIPMENTS
-    join_type: inner
-    relationship_type: many_to_one
-    on:
+    relationship_columns:
       - left_column: SHIPMENT_ID
         right_column: SHIPMENT_ID
     description: "Each receipt receives one shipment"
@@ -846,9 +967,7 @@ relationships:
   - name: RECEIPTS_TO_PLANTS
     left_table: RECEIPTS
     right_table: PLANTS
-    join_type: inner
-    relationship_type: many_to_one
-    on:
+    relationship_columns:
       - left_column: PLANT_ID
         right_column: PLANT_ID
     description: "Each receipt occurs at one plant"
@@ -856,9 +975,7 @@ relationships:
   - name: INVENTORY_TO_MATERIALS
     left_table: INVENTORY
     right_table: MATERIALS
-    join_type: inner
-    relationship_type: many_to_one
-    on:
+    relationship_columns:
       - left_column: MATERIAL_ID
         right_column: MATERIAL_ID
     description: "Each inventory record tracks one material"
@@ -866,9 +983,7 @@ relationships:
   - name: INVENTORY_TO_PLANTS
     left_table: INVENTORY
     right_table: PLANTS
-    join_type: inner
-    relationship_type: many_to_one
-    on:
+    relationship_columns:
       - left_column: PLANT_ID
         right_column: PLANT_ID
     description: "Each inventory record is at one plant"
@@ -876,9 +991,7 @@ relationships:
   - name: DEMAND_TO_MATERIALS
     left_table: DEMAND
     right_table: MATERIALS
-    join_type: inner
-    relationship_type: many_to_one
-    on:
+    relationship_columns:
       - left_column: MATERIAL_ID
         right_column: MATERIAL_ID
     description: "Each demand signal requires one material"
@@ -886,9 +999,7 @@ relationships:
   - name: DEMAND_TO_PLANTS
     left_table: DEMAND
     right_table: PLANTS
-    join_type: inner
-    relationship_type: many_to_one
-    on:
+    relationship_columns:
       - left_column: PLANT_ID
         right_column: PLANT_ID
     description: "Each demand signal is at one plant"
@@ -896,156 +1007,10 @@ relationships:
   - name: CUSTOMER_ORDERS_TO_PLANTS
     left_table: CUSTOMER_ORDERS
     right_table: PLANTS
-    join_type: inner
-    relationship_type: many_to_one
-    on:
+    relationship_columns:
       - left_column: PLANT_ID
         right_column: PLANT_ID
     description: "Each customer order is fulfilled from one plant"
-
-# ================================================================
-# METRICS (pre-aggregated calculations preventing double-counting)
-# ================================================================
-metrics:
-  - name: SUPPLIER_OTD_RATE
-    expr: "COUNT_IF(IS_ON_TIME = TRUE) / NULLIF(COUNT_IF(IS_ON_TIME IS NOT NULL), 0) * 100"
-    base_table: PO_LINES
-    data_type: NUMBER
-    description: "Percentage of delivered PO lines arriving on or before promised date"
-    synonyms:
-      - "on-time delivery rate"
-      - "OTD %"
-      - "supplier on-time percentage"
-    default_aggregation: none
-
-  - name: IN_FULL_RATE
-    expr: "COUNT_IF(IS_IN_FULL = TRUE) / NULLIF(COUNT_IF(IS_IN_FULL IS NOT NULL), 0) * 100"
-    base_table: PO_LINES
-    data_type: NUMBER
-    description: "Percentage of closed PO lines received with full quantity"
-    synonyms:
-      - "fill rate"
-      - "in-full percentage"
-    default_aggregation: none
-
-  - name: INBOUND_OTIF_RATE
-    expr: "COUNT_IF(IS_OTIF = TRUE) / NULLIF(COUNT_IF(IS_OTIF IS NOT NULL), 0) * 100"
-    base_table: PO_LINES
-    data_type: NUMBER
-    description: "Percentage of PO lines delivered both on-time AND in-full"
-    synonyms:
-      - "supplier OTIF"
-      - "inbound OTIF"
-      - "procurement OTIF"
-    default_aggregation: none
-
-  - name: CUSTOMER_OTIF_RATE
-    expr: "COUNT_IF(CUSTOMER_OTIF_FLAG = TRUE) / NULLIF(COUNT_IF(CUSTOMER_OTIF_FLAG IS NOT NULL), 0) * 100"
-    base_table: CUSTOMER_ORDERS
-    data_type: NUMBER
-    description: "Percentage of customer orders shipped on-time AND in-full"
-    synonyms:
-      - "outbound OTIF"
-      - "customer service level"
-      - "OTIF rate"
-    default_aggregation: none
-
-  - name: TOTAL_REVENUE_AT_RISK
-    expr: "SUM(REVENUE_AT_RISK)"
-    base_table: CUSTOMER_ORDERS
-    data_type: NUMBER
-    description: "Total monetary value of customer orders that failed OTIF"
-    synonyms:
-      - "OTIF revenue impact"
-      - "at-risk revenue"
-    default_aggregation: none
-
-  - name: AVG_DELIVERY_VARIANCE
-    expr: "AVG(DELIVERY_VARIANCE_DAYS)"
-    base_table: PO_LINES
-    data_type: NUMBER
-    description: "Average days between promised and actual delivery. Positive = late."
-    synonyms:
-      - "average lateness"
-      - "mean delivery delay"
-    default_aggregation: none
-
-  - name: TOTAL_PO_LINE_VALUE
-    expr: "SUM(LINE_VALUE)"
-    base_table: PO_LINES
-    data_type: NUMBER
-    description: "Total procurement spend across PO lines"
-    synonyms:
-      - "total spend"
-      - "procurement value"
-    default_aggregation: none
-
-  - name: TOTAL_INVENTORY_VALUE
-    expr: "SUM(INVENTORY_VALUE)"
-    base_table: INVENTORY
-    data_type: NUMBER
-    description: "Total carrying value of inventory across all positions"
-    synonyms:
-      - "total stock value"
-      - "inventory investment"
-    default_aggregation: none
-
-  - name: STOCKOUT_COUNT
-    expr: "COUNT_IF(QTY_ON_HAND = 0)"
-    base_table: INVENTORY
-    data_type: NUMBER
-    description: "Number of material-plant positions with zero on-hand stock"
-    synonyms:
-      - "out of stock count"
-      - "zero stock count"
-    default_aggregation: none
-
-  - name: AVG_DAYS_OF_SUPPLY
-    expr: "AVG(DAYS_OF_SUPPLY)"
-    base_table: INVENTORY
-    data_type: NUMBER
-    description: "Average days of supply across inventory positions"
-    synonyms:
-      - "average coverage"
-      - "mean DOS"
-    default_aggregation: none
-
-  - name: TOTAL_DEMAND_QTY
-    expr: "SUM(QUANTITY_DEMANDED)"
-    base_table: DEMAND
-    data_type: NUMBER
-    description: "Total quantity demanded across all signals"
-    default_aggregation: none
-
-  - name: QUALITY_ACCEPTANCE_RATE
-    expr: "SUM(QUANTITY_ACCEPTED) / NULLIF(SUM(RECEIPT_QTY_RECEIVED), 0) * 100"
-    base_table: RECEIPTS
-    data_type: NUMBER
-    description: "Percentage of received quantity passing quality inspection"
-    synonyms:
-      - "acceptance rate"
-      - "quality pass rate"
-    default_aggregation: none
-
-  - name: CARRIER_ON_TIME_RATE
-    expr: "COUNT_IF(ACTUAL_ARRIVAL_DATE <= ESTIMATED_ARRIVAL_DATE) / NULLIF(COUNT_IF(ACTUAL_ARRIVAL_DATE IS NOT NULL), 0) * 100"
-    base_table: SHIPMENTS
-    data_type: NUMBER
-    description: "Percentage of shipments arriving on or before ETA"
-    synonyms:
-      - "carrier reliability"
-      - "transport on-time"
-    default_aggregation: none
-
-  - name: EXPEDITE_RATE
-    expr: "COUNT_IF(PO_TYPE = 'EXPEDITE') / NULLIF(COUNT(*), 0) * 100"
-    base_table: PURCHASE_ORDERS
-    data_type: NUMBER
-    description: "Percentage of purchase orders placed as expedite (indicator of planning failures)"
-    synonyms:
-      - "rush order rate"
-      - "emergency order percentage"
-    default_aggregation: none
 
 # ================================================================
 # VERIFIED QUERIES (VQRs)
@@ -1053,23 +1018,23 @@ metrics:
 verified_queries:
   - name: "overall_supplier_otif_rate"
     question: "What is the overall supplier OTIF rate?"
-    verified_at: "2026-08-28"
+    verified_at: 1787855400
     verified_by: "SNOWRUBAN"
     sql: |
       SELECT
         ROUND(COUNT_IF(
-          ACTUAL_DELIVERY_DATE IS NOT NULL
+          LINE_STATUS IN ('CLOSED','SHORT_CLOSED')
+          AND ACTUAL_DELIVERY_DATE IS NOT NULL
           AND ACTUAL_DELIVERY_DATE <= PROMISED_DELIVERY_DATE
           AND QUANTITY_RECEIVED >= QUANTITY_ORDERED
         ) * 100.0 / NULLIF(COUNT_IF(
-          ACTUAL_DELIVERY_DATE IS NOT NULL
-          AND LINE_STATUS IN ('CLOSED','SHORT_CLOSED')
+          LINE_STATUS IN ('CLOSED','SHORT_CLOSED')
         ), 0), 2) AS otif_rate_pct
       FROM OTIF_GUARDIAN.RAW.PO_LINES
 
   - name: "otif_rate_by_supplier"
     question: "What is the OTIF rate by supplier?"
-    verified_at: "2026-08-28"
+    verified_at: 1787855400
     verified_by: "SNOWRUBAN"
     sql: |
       SELECT
@@ -1091,7 +1056,7 @@ verified_queries:
 
   - name: "customer_otif_by_plant"
     question: "What is the customer OTIF rate by plant?"
-    verified_at: "2026-08-28"
+    verified_at: 1787855400
     verified_by: "SNOWRUBAN"
     sql: |
       SELECT
@@ -1109,7 +1074,7 @@ verified_queries:
 
   - name: "inventory_stockout_risk"
     question: "Which materials are at stockout risk?"
-    verified_at: "2026-08-28"
+    verified_at: 1787855400
     verified_by: "SNOWRUBAN"
     sql: |
       SELECT
@@ -1130,7 +1095,7 @@ verified_queries:
 
   - name: "late_po_lines_at_risk"
     question: "Which PO lines are overdue or at risk of being late?"
-    verified_at: "2026-08-28"
+    verified_at: 1787855400
     verified_by: "SNOWRUBAN"
     sql: |
       SELECT
@@ -1154,7 +1119,7 @@ verified_queries:
 
   - name: "top_spending_by_supplier"
     question: "Who are our top suppliers by spend?"
-    verified_at: "2026-08-28"
+    verified_at: 1787855400
     verified_by: "SNOWRUBAN"
     sql: |
       SELECT
@@ -1173,7 +1138,7 @@ verified_queries:
 
   - name: "demand_supply_gap"
     question: "Where are the demand-supply gaps?"
-    verified_at: "2026-08-28"
+    verified_at: 1787855400
     verified_by: "SNOWRUBAN"
     sql: |
       SELECT
@@ -1197,25 +1162,27 @@ verified_queries:
 
   - name: "monthly_otif_trend"
     question: "What is the monthly OTIF trend?"
-    verified_at: "2026-08-28"
+    verified_at: 1787855400
     verified_by: "SNOWRUBAN"
     sql: |
       SELECT
         DATE_TRUNC('month', ACTUAL_DELIVERY_DATE) AS month,
-        COUNT(*) AS total_delivered,
+        COUNT(*) AS total_lines,
         ROUND(COUNT_IF(
-          ACTUAL_DELIVERY_DATE <= PROMISED_DELIVERY_DATE
+          ACTUAL_DELIVERY_DATE IS NOT NULL
+          AND ACTUAL_DELIVERY_DATE <= PROMISED_DELIVERY_DATE
           AND QUANTITY_RECEIVED >= QUANTITY_ORDERED
         ) * 100.0 / NULLIF(COUNT(*), 0), 2) AS otif_rate_pct
       FROM OTIF_GUARDIAN.RAW.PO_LINES
-      WHERE ACTUAL_DELIVERY_DATE IS NOT NULL
+      WHERE LINE_STATUS IN ('CLOSED','SHORT_CLOSED')
+        AND ACTUAL_DELIVERY_DATE IS NOT NULL
         AND ACTUAL_DELIVERY_DATE >= DATEADD('month', -12, CURRENT_DATE())
       GROUP BY DATE_TRUNC('month', ACTUAL_DELIVERY_DATE)
       ORDER BY month
 
   - name: "carrier_performance"
     question: "How are carriers performing on delivery reliability?"
-    verified_at: "2026-08-28"
+    verified_at: 1787855400
     verified_by: "SNOWRUBAN"
     sql: |
       SELECT
@@ -1226,6 +1193,7 @@ verified_queries:
         ROUND(COUNT_IF(ACTUAL_ARRIVAL_DATE <= ESTIMATED_ARRIVAL_DATE) * 100.0
           / NULLIF(COUNT(*), 0), 2) AS on_time_pct
       FROM OTIF_GUARDIAN.RAW.SHIPMENTS
-      WHERE ACTUAL_ARRIVAL_DATE IS NOT NULL
+      WHERE SHIPMENT_STATUS = 'DELIVERED'
+        AND ACTUAL_ARRIVAL_DATE IS NOT NULL
       GROUP BY CARRIER_CODE, TRANSPORT_MODE
       ORDER BY on_time_pct ASC

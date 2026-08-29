@@ -34,7 +34,10 @@ SELECT
     alt_stats.materials_as_primary,
     alt_stats.materials_as_alternate,
     -- Risk indicators
+    -- NULL or unrecognized status is treated as UNKNOWN risk (defensive).
+    -- PROBATION is always HIGH regardless of OTD metrics.
     CASE
+        WHEN s.status IS NULL THEN 'UNKNOWN'
         WHEN s.status = 'PROBATION' THEN 'HIGH'
         WHEN s.historical_otd_pct < 80 THEN 'HIGH'
         WHEN s.historical_otd_pct < 88 THEN 'MEDIUM'
@@ -42,6 +45,7 @@ SELECT
     END AS risk_level
 FROM OTIF_GUARDIAN.RAW.SUPPLIERS s
 LEFT JOIN (
+    -- All POs regardless of status (total_pos is a lifetime count)
     SELECT
         supplier_id,
         COUNT(*) AS total_pos,
@@ -51,6 +55,7 @@ LEFT JOIN (
     GROUP BY supplier_id
 ) po_stats ON s.supplier_id = po_stats.supplier_id
 LEFT JOIN (
+    -- All PO lines regardless of status (materials_supplied is a lifetime count)
     SELECT
         po.supplier_id,
         COUNT(DISTINCT pl.material_id) AS materials_supplied
@@ -59,6 +64,8 @@ LEFT JOIN (
     GROUP BY po.supplier_id
 ) mat_stats ON s.supplier_id = mat_stats.supplier_id
 LEFT JOIN (
+    -- Only ACTIVE sourcing records (inactive/deprecated assignments are excluded
+    -- because they don't represent current sourcing capability)
     SELECT
         supplier_id,
         COUNT(CASE WHEN source_type = 'PRIMARY' THEN 1 END) AS materials_as_primary,
@@ -332,11 +339,17 @@ SELECT
         THEN TRUE
         ELSE FALSE
     END AS is_overdue,
+    -- arrived_on_time: only evaluated for DELIVERED shipments.
+    -- DAMAGED shipments are excluded (NULL) because a damaged delivery is not
+    -- a successful on-time arrival regardless of timing. IN_TRANSIT shipments
+    -- are excluded because they haven't arrived yet.
     CASE
-        WHEN sh.actual_arrival_date IS NOT NULL
+        WHEN sh.shipment_status = 'DELIVERED'
+             AND sh.actual_arrival_date IS NOT NULL
              AND sh.actual_arrival_date <= sh.estimated_arrival_date
         THEN TRUE
-        WHEN sh.actual_arrival_date IS NOT NULL
+        WHEN sh.shipment_status = 'DELIVERED'
+             AND sh.actual_arrival_date IS NOT NULL
         THEN FALSE
         ELSE NULL
     END AS arrived_on_time
@@ -468,6 +481,11 @@ SELECT
         THEN FALSE
         ELSE NULL
     END AS is_on_time,
+    -- is_in_full: proxy, not a true in-full check. CUSTOMER_ORDERS lacks line-level
+    -- quantity_shipped vs quantity_ordered data, so order_status = 'SHIPPED' is used
+    -- as a stand-in for "in full" and 'PARTIAL' for "not in full." This is a known
+    -- limitation of the current data model, not a verified quantity match. If line-level
+    -- quantity data becomes available, replace this with a real quantity comparison.
     CASE
         WHEN co.order_status = 'SHIPPED' THEN TRUE
         WHEN co.order_status = 'PARTIAL' THEN FALSE
@@ -489,6 +507,19 @@ JOIN OTIF_GUARDIAN.RAW.PLANTS p ON co.plant_id = p.plant_id;
 -- ============================================================
 
 CREATE OR REPLACE VIEW OTIF_GUARDIAN.ANALYTICS.V_SOURCING_MAP AS
+-- Transport context: pick the single best lane per supplier origin country
+-- (highest reliability_pct). This avoids fan-out from the 1:many relationship
+-- between supplier country and transport lanes to multiple plant countries.
+WITH best_lane AS (
+    SELECT *
+    FROM (
+        SELECT
+            tl.*,
+            ROW_NUMBER() OVER (PARTITION BY tl.origin_country ORDER BY tl.reliability_pct DESC, tl.cost_per_kg ASC) AS rn
+        FROM OTIF_GUARDIAN.RAW.TRANSPORT_LANES tl
+    )
+    WHERE rn = 1
+)
 SELECT
     als.alt_supplier_id,
     als.material_id,
@@ -512,21 +543,17 @@ SELECT
     als.price_multiplier,
     ROUND(m.standard_unit_cost * als.price_multiplier, 2) AS effective_unit_cost,
     als.status AS sourcing_status,
-    -- Transport context
-    tl.lane_code,
-    tl.primary_mode,
-    tl.transit_days,
-    tl.cost_per_kg,
-    tl.reliability_pct,
-    tl.carbon_kg_per_kg
+    -- Transport context (best lane from supplier's country by reliability)
+    bl.lane_code,
+    bl.primary_mode,
+    bl.transit_days,
+    bl.cost_per_kg,
+    bl.reliability_pct,
+    bl.carbon_kg_per_kg
 FROM OTIF_GUARDIAN.RAW.ALTERNATE_SUPPLIERS als
 JOIN OTIF_GUARDIAN.RAW.MATERIALS m ON als.material_id = m.material_id
 JOIN OTIF_GUARDIAN.RAW.SUPPLIERS s ON als.supplier_id = s.supplier_id
-LEFT JOIN OTIF_GUARDIAN.RAW.TRANSPORT_LANES tl
-    ON s.country_code = tl.origin_country
-    -- Join to any plant country for the lane (simplified; production would filter by specific plant)
-LEFT JOIN (SELECT DISTINCT country_code FROM OTIF_GUARDIAN.RAW.PLANTS) pc
-    ON tl.dest_country = pc.country_code;
+LEFT JOIN best_lane bl ON s.country_code = bl.origin_country;
 
 -- ============================================================
 -- 11. TRANSPORT NETWORK (lane enrichment)
@@ -544,9 +571,10 @@ SELECT
     tl.reliability_pct,
     tl.carbon_kg_per_kg,
     tl.status,
-    -- Volume context
-    orig.supplier_count,
-    dest.plant_count,
+    -- Volume context (ACTIVE entities only — reflects current operational capacity,
+    -- not historical. Inactive/probation suppliers and shuttered plants are excluded.)
+    orig.active_supplier_count,
+    dest.active_plant_count,
     -- Efficiency classification
     CASE
         WHEN tl.reliability_pct >= 95 AND tl.cost_per_kg < 1.0 THEN 'OPTIMAL'
@@ -556,13 +584,13 @@ SELECT
     END AS lane_health
 FROM OTIF_GUARDIAN.RAW.TRANSPORT_LANES tl
 LEFT JOIN (
-    SELECT country_code, COUNT(*) AS supplier_count
+    SELECT country_code, COUNT(*) AS active_supplier_count
     FROM OTIF_GUARDIAN.RAW.SUPPLIERS
     WHERE status = 'ACTIVE'
     GROUP BY country_code
 ) orig ON tl.origin_country = orig.country_code
 LEFT JOIN (
-    SELECT country_code, COUNT(*) AS plant_count
+    SELECT country_code, COUNT(*) AS active_plant_count
     FROM OTIF_GUARDIAN.RAW.PLANTS
     WHERE status = 'ACTIVE'
     GROUP BY country_code

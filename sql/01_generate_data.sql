@@ -239,119 +239,112 @@ FROM seed_data s;
 -- ============================================================
 
 CREATE OR REPLACE TABLE OTIF_GUARDIAN.RAW.PO_LINES AS
+-- Risk-correlated outcome bucketing: breach probability varies by supplier
+-- OTD%, quality score, material criticality, single-sourced status, and
+-- probation status. Base clean threshold of 94 is adjusted per-line so that
+-- the aggregate OTIF rate stays near 90%, with a ~10pp spread from safest
+-- (OTD>=95: ~97% OTIF) to riskiest (probation: ~87% OTIF) supplier bands.
+-- Failure space is split 60% late / 30% short / 10% both.
 WITH seed_data AS (
-    SELECT ROW_NUMBER() OVER (ORDER BY SEQ4()) AS line_id, SEQ4() AS seq
+    SELECT ROW_NUMBER() OVER (ORDER BY SEQ4()) AS line_id
     FROM TABLE(GENERATOR(ROWCOUNT => 30800))
 ),
 po_count AS (
     SELECT COUNT(*) AS total_pos FROM OTIF_GUARDIAN.RAW.PURCHASE_ORDERS
+),
+line_risk AS (
+    SELECT
+        s.line_id,
+        1 + ABS(MOD(HASH(s.line_id, 3001), (SELECT total_pos FROM po_count))) AS po_id,
+        1 + ABS(MOD(HASH(s.line_id, 3101), 250)) AS material_id,
+        ABS(MOD(HASH(s.line_id, 3001), 6400)) > 6000 AS is_active,
+        ABS(MOD(HASH(s.line_id, 4001), 100)) AS outcome_roll,
+        GREATEST(60, LEAST(97,
+            94
+            + CASE WHEN sup.historical_otd_pct >= 95 THEN 5
+                   WHEN sup.historical_otd_pct >= 90 THEN 3
+                   WHEN sup.historical_otd_pct >= 85 THEN 1
+                   WHEN sup.historical_otd_pct >= 80 THEN -2
+                   ELSE -3 END
+            + CASE WHEN sup.quality_score >= 95 THEN 2
+                   WHEN sup.quality_score >= 90 THEN 1
+                   WHEN sup.quality_score >= 85 THEN -1
+                   ELSE -2 END
+            + CASE WHEN mat.criticality = 'STANDARD' THEN 2
+                   WHEN mat.criticality = 'IMPORTANT' THEN 0
+                   ELSE -1 END
+            + CASE WHEN COALESCE(alt.alt_count, 0) <= 1 THEN -3 ELSE 0 END
+            + CASE WHEN sup.status = 'PROBATION' THEN -5 ELSE 0 END
+        )) AS clean_threshold
+    FROM seed_data s
+    JOIN OTIF_GUARDIAN.RAW.PURCHASE_ORDERS po
+        ON 1 + ABS(MOD(HASH(s.line_id, 3001), (SELECT total_pos FROM po_count))) = po.po_id
+    JOIN OTIF_GUARDIAN.RAW.SUPPLIERS sup ON po.supplier_id = sup.supplier_id
+    JOIN OTIF_GUARDIAN.RAW.MATERIALS mat
+        ON 1 + ABS(MOD(HASH(s.line_id, 3101), 250)) = mat.material_id
+    LEFT JOIN (
+        SELECT material_id, COUNT(*) AS alt_count
+        FROM OTIF_GUARDIAN.RAW.ALTERNATE_SUPPLIERS WHERE status = 'ACTIVE'
+        GROUP BY material_id
+    ) alt ON 1 + ABS(MOD(HASH(s.line_id, 3101), 250)) = alt.material_id
 )
 SELECT
-    s.line_id AS po_line_id,
-    -- Distribute lines across POs (avg ~4.8 lines per PO)
-    1 + MOD(HASH(s.line_id, 3001), (SELECT total_pos FROM po_count)) AS po_id,
-    -- Line number within PO
-    1 + MOD(s.line_id - 1, 7) AS line_number,
-    -- Material assignment
-    1 + MOD(HASH(s.line_id, 3101), 250) AS material_id,
-    -- Quantity: log-normal distribution (10 - 50000)
-    GREATEST(10, FLOOR(POWER(10, 1 + (MOD(HASH(s.line_id, 3201), 370) / 100.0)) * 0.1))::INTEGER AS quantity_ordered,
-    -- Unit price with some variation from standard
-    ROUND(
-        POWER(10, 0.5 + (MOD(HASH(1 + MOD(HASH(s.line_id, 3101), 250), 1401), 350) / 100.0)) * 0.05
-        * (0.85 + MOD(HASH(s.line_id, 3301), 30) / 100.0),
-    2) AS unit_price,
-    -- Quantity received (outcome-bucketed: 90% clean, 6% late-only, 3% short, 1% both)
+    lr.line_id AS po_line_id,
+    lr.po_id,
+    1 + MOD(lr.line_id - 1, 7) AS line_number,
+    lr.material_id,
+    GREATEST(10, FLOOR(POWER(10, 1 + (ABS(MOD(HASH(lr.line_id, 3201), 370)) / 100.0)) * 0.1))::INTEGER AS quantity_ordered,
+    ROUND(POWER(10, 0.5 + (ABS(MOD(HASH(1 + ABS(MOD(HASH(lr.line_id, 3101), 250)), 1401), 350)) / 100.0)) * 0.05
+        * (0.85 + ABS(MOD(HASH(lr.line_id, 3301), 30)) / 100.0), 2) AS unit_price,
+    -- Quantity received (risk-adjusted outcome bucketing)
     CASE
-        WHEN MOD(HASH(s.line_id, 3001), 6400) > 6000 THEN
-            -- Active lines: 0-70% received
-            FLOOR(GREATEST(10, FLOOR(POWER(10, 1 + (MOD(HASH(s.line_id, 3201), 370) / 100.0)) * 0.1))
-                * MOD(HASH(s.line_id, 3401), 70) / 100.0)::INTEGER
-        WHEN MOD(HASH(s.line_id, 4001), 100) < 90 THEN
-            -- 90% clean: fully filled
-            GREATEST(10, FLOOR(POWER(10, 1 + (MOD(HASH(s.line_id, 3201), 370) / 100.0)) * 0.1))::INTEGER
-        WHEN MOD(HASH(s.line_id, 4001), 100) < 96 THEN
-            -- 6% late-only: fully filled
-            GREATEST(10, FLOOR(POWER(10, 1 + (MOD(HASH(s.line_id, 3201), 370) / 100.0)) * 0.1))::INTEGER
-        WHEN MOD(HASH(s.line_id, 4001), 100) < 99 THEN
-            -- 3% short-shipped only: 70-94% fill
-            FLOOR(GREATEST(10, FLOOR(POWER(10, 1 + (MOD(HASH(s.line_id, 3201), 370) / 100.0)) * 0.1))
-                * (70 + MOD(HASH(s.line_id, 3903), 25)) / 100.0)::INTEGER
+        WHEN lr.is_active THEN
+            FLOOR(GREATEST(10, FLOOR(POWER(10, 1 + (ABS(MOD(HASH(lr.line_id, 3201), 370)) / 100.0)) * 0.1))
+                * ABS(MOD(HASH(lr.line_id, 3401), 70)) / 100.0)::INTEGER
+        WHEN lr.outcome_roll < lr.clean_threshold THEN
+            GREATEST(10, FLOOR(POWER(10, 1 + (ABS(MOD(HASH(lr.line_id, 3201), 370)) / 100.0)) * 0.1))::INTEGER
+        WHEN lr.outcome_roll < lr.clean_threshold + GREATEST(1, ROUND((100 - lr.clean_threshold) * 0.6)) THEN
+            GREATEST(10, FLOOR(POWER(10, 1 + (ABS(MOD(HASH(lr.line_id, 3201), 370)) / 100.0)) * 0.1))::INTEGER
+        WHEN lr.outcome_roll < lr.clean_threshold + GREATEST(2, ROUND((100 - lr.clean_threshold) * 0.9)) THEN
+            FLOOR(GREATEST(10, FLOOR(POWER(10, 1 + (ABS(MOD(HASH(lr.line_id, 3201), 370)) / 100.0)) * 0.1))
+                * (70 + ABS(MOD(HASH(lr.line_id, 3903), 25))) / 100.0)::INTEGER
         ELSE
-            -- 1% both late AND short: 50-79% fill
-            FLOOR(GREATEST(10, FLOOR(POWER(10, 1 + (MOD(HASH(s.line_id, 3201), 370) / 100.0)) * 0.1))
-                * (50 + MOD(HASH(s.line_id, 3903), 30)) / 100.0)::INTEGER
+            FLOOR(GREATEST(10, FLOOR(POWER(10, 1 + (ABS(MOD(HASH(lr.line_id, 3201), 370)) / 100.0)) * 0.1))
+                * (50 + ABS(MOD(HASH(lr.line_id, 3903), 30))) / 100.0)::INTEGER
     END AS quantity_received,
-    -- Line status
+    -- Line status (unchanged from original)
     CASE
-        WHEN MOD(HASH(s.line_id, 3001), 6400) > 6000 THEN
-            CASE MOD(HASH(s.line_id, 3601), 4)
-                WHEN 0 THEN 'OPEN'
-                WHEN 1 THEN 'PARTIALLY_RECEIVED'
-                WHEN 2 THEN 'OPEN'
-                WHEN 3 THEN 'IN_TRANSIT'
-            END
+        WHEN lr.is_active THEN
+            CASE ABS(MOD(HASH(lr.line_id, 3601), 4))
+                WHEN 0 THEN 'OPEN' WHEN 1 THEN 'PARTIALLY_RECEIVED'
+                WHEN 2 THEN 'OPEN' WHEN 3 THEN 'IN_TRANSIT' END
         ELSE
-            CASE MOD(HASH(s.line_id, 3701), 20)
-                WHEN 0 THEN 'SHORT_CLOSED'
-                WHEN 1 THEN 'CANCELLED'
-                ELSE 'CLOSED'
-            END
+            CASE ABS(MOD(HASH(lr.line_id, 3701), 20))
+                WHEN 0 THEN 'SHORT_CLOSED' WHEN 1 THEN 'CANCELLED' ELSE 'CLOSED' END
     END AS line_status,
-    -- Promised date
-    DATEADD('day',
-        14 + MOD(HASH(s.line_id, 3801), 45),
+    -- Promised date (unchanged)
+    DATEADD('day', 14 + ABS(MOD(HASH(lr.line_id, 3801), 45)),
         DATEADD('day',
-            -1 * GREATEST(0, FLOOR(POWER(MOD(HASH(1 + MOD(HASH(s.line_id, 3001), 6400), 2201), 1000) / 1000.0, 0.5) * 1095)),
-            '2026-08-28'::DATE
-        )
-    ) AS promised_delivery_date,
-    -- Actual delivery date (outcome-bucketed: matches quantity_received logic)
+            -1 * GREATEST(0, FLOOR(POWER(ABS(MOD(HASH(1 + ABS(MOD(HASH(lr.line_id, 3001), 6400)), 2201), 1000)) / 1000.0, 0.5) * 1095)),
+            '2026-08-28'::DATE)) AS promised_delivery_date,
+    -- Actual delivery date (risk-adjusted outcome bucketing)
     CASE
-        WHEN MOD(HASH(s.line_id, 3001), 6400) > 6000 THEN NULL
-        WHEN MOD(HASH(s.line_id, 4001), 100) < 90 THEN
-            -- 90% clean: early/on-time (-5 to 0 days)
-            DATEADD('day',
-                14 + MOD(HASH(s.line_id, 3801), 45)
-                + (MOD(HASH(s.line_id, 3901), 6) - 5),
-                DATEADD('day',
-                    -1 * GREATEST(0, FLOOR(POWER(MOD(HASH(1 + MOD(HASH(s.line_id, 3001), 6400), 2201), 1000) / 1000.0, 0.5) * 1095)),
-                    '2026-08-28'::DATE
-                )
-            )
-        WHEN MOD(HASH(s.line_id, 4001), 100) < 96 THEN
-            -- 6% late-only: 1 to 10 days late
-            DATEADD('day',
-                14 + MOD(HASH(s.line_id, 3801), 45)
-                + (1 + MOD(HASH(s.line_id, 3902), 10)),
-                DATEADD('day',
-                    -1 * GREATEST(0, FLOOR(POWER(MOD(HASH(1 + MOD(HASH(s.line_id, 3001), 6400), 2201), 1000) / 1000.0, 0.5) * 1095)),
-                    '2026-08-28'::DATE
-                )
-            )
-        WHEN MOD(HASH(s.line_id, 4001), 100) < 99 THEN
-            -- 3% short-shipped only: still on-time (-5 to 0 days)
-            DATEADD('day',
-                14 + MOD(HASH(s.line_id, 3801), 45)
-                + (MOD(HASH(s.line_id, 3901), 6) - 5),
-                DATEADD('day',
-                    -1 * GREATEST(0, FLOOR(POWER(MOD(HASH(1 + MOD(HASH(s.line_id, 3001), 6400), 2201), 1000) / 1000.0, 0.5) * 1095)),
-                    '2026-08-28'::DATE
-                )
-            )
+        WHEN lr.is_active THEN NULL
+        WHEN lr.outcome_roll < lr.clean_threshold THEN
+            DATEADD('day', 14 + ABS(MOD(HASH(lr.line_id, 3801), 45)) + (ABS(MOD(HASH(lr.line_id, 3901), 6)) - 5),
+                DATEADD('day', -1 * GREATEST(0, FLOOR(POWER(ABS(MOD(HASH(1 + ABS(MOD(HASH(lr.line_id, 3001), 6400)), 2201), 1000)) / 1000.0, 0.5) * 1095)), '2026-08-28'::DATE))
+        WHEN lr.outcome_roll < lr.clean_threshold + GREATEST(1, ROUND((100 - lr.clean_threshold) * 0.6)) THEN
+            DATEADD('day', 14 + ABS(MOD(HASH(lr.line_id, 3801), 45)) + (1 + ABS(MOD(HASH(lr.line_id, 3902), 10))),
+                DATEADD('day', -1 * GREATEST(0, FLOOR(POWER(ABS(MOD(HASH(1 + ABS(MOD(HASH(lr.line_id, 3001), 6400)), 2201), 1000)) / 1000.0, 0.5) * 1095)), '2026-08-28'::DATE))
+        WHEN lr.outcome_roll < lr.clean_threshold + GREATEST(2, ROUND((100 - lr.clean_threshold) * 0.9)) THEN
+            DATEADD('day', 14 + ABS(MOD(HASH(lr.line_id, 3801), 45)) + (ABS(MOD(HASH(lr.line_id, 3901), 6)) - 5),
+                DATEADD('day', -1 * GREATEST(0, FLOOR(POWER(ABS(MOD(HASH(1 + ABS(MOD(HASH(lr.line_id, 3001), 6400)), 2201), 1000)) / 1000.0, 0.5) * 1095)), '2026-08-28'::DATE))
         ELSE
-            -- 1% both late AND short: 5 to 19 days late
-            DATEADD('day',
-                14 + MOD(HASH(s.line_id, 3801), 45)
-                + (5 + MOD(HASH(s.line_id, 3902), 15)),
-                DATEADD('day',
-                    -1 * GREATEST(0, FLOOR(POWER(MOD(HASH(1 + MOD(HASH(s.line_id, 3001), 6400), 2201), 1000) / 1000.0, 0.5) * 1095)),
-                    '2026-08-28'::DATE
-                )
-            )
+            DATEADD('day', 14 + ABS(MOD(HASH(lr.line_id, 3801), 45)) + (5 + ABS(MOD(HASH(lr.line_id, 3902), 15))),
+                DATEADD('day', -1 * GREATEST(0, FLOOR(POWER(ABS(MOD(HASH(1 + ABS(MOD(HASH(lr.line_id, 3001), 6400)), 2201), 1000)) / 1000.0, 0.5) * 1095)), '2026-08-28'::DATE))
     END AS actual_delivery_date,
     CURRENT_TIMESTAMP() AS created_at
-FROM seed_data s;
+FROM line_risk lr;
 
 -- ============================================================
 -- 6. SHIPMENTS

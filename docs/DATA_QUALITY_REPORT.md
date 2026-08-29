@@ -99,16 +99,30 @@ TRANSPORT_LANES
 
 **PO Line Outcome Distribution (historical lines only):**
 
-Each historical PO line is assigned to one of four outcome buckets via `MOD(HASH(line_id, 4001), 100)`. The bucket jointly determines both delivery variance and fill rate, creating realistic correlation between the two dimensions:
+Each historical PO line is assigned a per-line `clean_threshold` (60-97) based on supplier and material risk factors, then bucketed via `MOD(HASH(line_id, 4001), 100)` against that threshold. This creates realistic correlation between supplier/material attributes and delivery outcomes.
 
-| Bucket | % of Lines | Delivery Variance | Fill Rate | Description |
-|--------|-----------|-------------------|-----------|-------------|
-| Clean | 90% | -5 to 0 days (early/on-time) | 100% | Normal operations |
-| Late only | 6% | +1 to +10 days late | 100% | Delivery delay, full quantity |
-| Short only | 3% | -5 to 0 days (on-time) | 70-94% | On-time but under-shipped |
-| Both | 1% | +5 to +19 days late | 50-79% | Worst case: late AND short |
+**Risk factors affecting clean_threshold (base 94):**
 
-This produces an expected OTIF rate of ~90% (lines that are both on-time AND in-full), with a right-skewed delivery variance distribution (peak at 0, long thin tail).
+| Factor | Best → Adjustment | Worst → Adjustment |
+|--------|------------------|--------------------|
+| Supplier OTD % | >= 95 → +5 | < 80 → -3 |
+| Supplier quality score | >= 95 → +2 | < 85 → -2 |
+| Material criticality | STANDARD → +2 | CRITICAL → -1 |
+| Single-sourced material | No → 0 | Yes → -3 |
+| Supplier on probation | No → 0 | Yes → -5 |
+
+**Resulting OTIF rates by supplier risk band:**
+
+| Supplier Band | OTIF Rate |
+|---------------|-----------|
+| OTD >= 95 | ~97% |
+| OTD 90-94 | ~95% |
+| OTD 85-89 | ~92% |
+| OTD 80-84 | ~91% |
+| OTD < 80 | ~89% |
+| Probation | ~87% |
+
+Failure space within each line's (100 - clean_threshold) is split 60% late / 30% short / 10% both. Aggregate OTIF rate is ~90%.
 
 ### Shipments
 | Attribute | Distribution | Values |
@@ -212,7 +226,7 @@ This produces a carrier on-time rate of ~85% (DELIVERED shipments arriving on or
 
 5. **Determinism** - All randomness uses `HASH(key, seed)` with fixed integer seeds. Re-running the script on the same Snowflake version produces identical data.
 
-6. **OTIF rate** - The outcome-bucketed distribution produces ~90% OTIF (on-time AND in-full), with 6% late-only, 3% short-only, and 1% both late and short. The right-skewed delivery variance has a peak near 0 days and a long thin tail out to +19 days.
+6. **OTIF rate** - Risk-correlated outcome bucketing produces ~90% aggregate OTIF, with a ~10pp spread from safest suppliers (OTD>=95: ~97%) to riskiest (probation: ~87%). Breach probability correlates with supplier OTD%, quality score, material criticality, single-sourced status, and probation — enabling the ML model to learn meaningful feature-outcome relationships.
 
 ---
 

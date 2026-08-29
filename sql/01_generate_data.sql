@@ -163,7 +163,7 @@ SELECT
     -- Unit cost: log-normal-like distribution ($0.50 - $2500)
     ROUND(POWER(10, 0.5 + (MOD(HASH(s.material_id, 1401), 350) / 100.0)) * 0.05, 2) AS standard_unit_cost,
     -- Weight in KG
-    ROUND(0.01 + (MOD(HASH(s.material_id, 1501), 10000) / 100.0), 2) AS weight_kg,
+    ROUND(0.01 + (ABS(MOD(HASH(s.material_id, 1501), 10000)) / 100.0), 2) AS weight_kg,
     -- ABC classification: 20% A, 30% B, 50% C
     CASE
         WHEN MOD(HASH(s.material_id, 1601), 100) < 20 THEN 'A'
@@ -322,11 +322,17 @@ SELECT
             CASE ABS(MOD(HASH(lr.line_id, 3701), 20))
                 WHEN 0 THEN 'SHORT_CLOSED' WHEN 1 THEN 'CANCELLED' ELSE 'CLOSED' END
     END AS line_status,
-    -- Promised date (unchanged)
-    DATEADD('day', 14 + ABS(MOD(HASH(lr.line_id, 3801), 45)),
-        DATEADD('day',
-            -1 * GREATEST(0, FLOOR(POWER(ABS(MOD(HASH(1 + ABS(MOD(HASH(lr.line_id, 3001), 6400)), 2201), 1000)) / 1000.0, 0.5) * 1095)),
-            '2026-08-28'::DATE)) AS promised_delivery_date,
+    -- Promised date: active lines get near-future dates (5-60 days from today);
+    -- historical lines keep the original order_date-relative calculation.
+    CASE
+        WHEN lr.is_active THEN
+            DATEADD('day', 5 + ABS(MOD(HASH(lr.line_id, 3801), 55)), CURRENT_DATE())
+        ELSE
+            DATEADD('day', 14 + ABS(MOD(HASH(lr.line_id, 3801), 45)),
+                DATEADD('day',
+                    -1 * GREATEST(0, FLOOR(POWER(ABS(MOD(HASH(1 + ABS(MOD(HASH(lr.line_id, 3001), 6400)), 2201), 1000)) / 1000.0, 0.5) * 1095)),
+                    '2026-08-28'::DATE))
+    END AS promised_delivery_date,
     -- Actual delivery date (risk-adjusted outcome bucketing)
     CASE
         WHEN lr.is_active THEN NULL

@@ -209,7 +209,9 @@ LEFT JOIN (
 -- ============================================================
 -- Split point: 2026-06-01
 -- Train: All PO lines with order_date < 2026-06-01 (and label IS NOT NULL)
--- Test:  All PO lines with order_date >= 2026-06-01 AND < 2026-08-01 (and label IS NOT NULL)
+-- Test:  All PO lines with order_date >= 2026-06-01 (and label IS NOT NULL)
+--        No upper bound — includes all closed/short-closed lines through today.
+--        This maximizes the test set; the training cutoff at 2026-06-01 prevents overlap.
 -- Score: Open lines (label IS NULL) — used for inference
 
 CREATE OR REPLACE TABLE OTIF_GUARDIAN.ML.TRAIN_DATA AS
@@ -222,8 +224,7 @@ CREATE OR REPLACE TABLE OTIF_GUARDIAN.ML.TEST_DATA AS
 SELECT * EXCLUDE (po_id, po_line_id, order_date, promised_delivery_date)
 FROM OTIF_GUARDIAN.ML.V_FEATURE_SET
 WHERE OTIF_BREACH IS NOT NULL
-  AND order_date >= '2026-06-01'::DATE
-  AND order_date < '2026-08-01'::DATE;
+  AND order_date >= '2026-06-01'::DATE;
 
 CREATE OR REPLACE TABLE OTIF_GUARDIAN.ML.SCORE_DATA AS
 SELECT *

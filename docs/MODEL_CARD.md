@@ -26,10 +26,10 @@
 |----------|-------|
 | Source | OTIF_GUARDIAN.RAW.PO_LINES + enrichments |
 | Temporal split | Train: order_date < 2026-06-01 |
-| Test holdout | order_date >= 2026-06-01 AND < 2026-08-01 |
-| Training rows | ~25,000-28,000 |
-| Test rows | ~2,000-3,000 |
-| Positive class (breach) | ~40-60% of training data |
+| Test holdout | order_date >= 2026-06-01 (no upper bound) |
+| Training rows | ~27,350 |
+| Test rows | ~123 |
+| Positive class (breach) | ~10% of training data |
 | Feature count | 30 |
 
 ## Features (30)
@@ -146,5 +146,6 @@ Historical supplier metrics use STRICT temporal filtering: only data from PO lin
 | Version | Date | Split | Notes |
 |---------|------|-------|-------|
 | V1 | 2026-08-28 | 2026-06-01 | Initial training, 30 features |
+| V2 | 2026-08-29 | 2026-06-01 | Retrained on risk-correlated data (~10% breach rate, down from ~40-60%). Test window widened to all post-cutoff dates. scale_pos_weight ~9x. 5-fold CV: precision 11.8%, recall 17.5%, F1 14.1% at default threshold. |
 
 Managed via: `OTIF_GUARDIAN.ML.OTIF_BREACH_PREDICTOR` (Snowflake Model Registry)

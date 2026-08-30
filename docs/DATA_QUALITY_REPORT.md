@@ -95,15 +95,55 @@ TRANSPORT_LANES
 | Line Quantity | Log-normal | 10 - 50,000 units |
 | Line Status (hist) | Weighted | CLOSED: 90%, SHORT_CLOSED: 5%, CANCELLED: 5% |
 | Line Status (active) | Uniform | OPEN, PARTIALLY_RECEIVED, IN_TRANSIT |
-| Delivery Variance | Normal-like | -5 to +9 days from promised |
+| **Line Outcome** | **Bucketed** | **See outcome distribution below** |
+
+**PO Line Outcome Distribution (historical lines only):**
+
+Each historical PO line is assigned a per-line `clean_threshold` (60-97) based on supplier and material risk factors, then bucketed via `MOD(HASH(line_id, 4001), 100)` against that threshold. This creates realistic correlation between supplier/material attributes and delivery outcomes.
+
+**Risk factors affecting clean_threshold (base 94):**
+
+| Factor | Best → Adjustment | Worst → Adjustment |
+|--------|------------------|--------------------|
+| Supplier OTD % | >= 95 → +5 | < 80 → -3 |
+| Supplier quality score | >= 95 → +2 | < 85 → -2 |
+| Material criticality | STANDARD → +2 | CRITICAL → -1 |
+| Single-sourced material | No → 0 | Yes → -3 |
+| Supplier on probation | No → 0 | Yes → -5 |
+
+**Resulting OTIF rates by supplier risk band:**
+
+| Supplier Band | OTIF Rate |
+|---------------|-----------|
+| OTD >= 95 | ~97% |
+| OTD 90-94 | ~95% |
+| OTD 85-89 | ~92% |
+| OTD 80-84 | ~91% |
+| OTD < 80 | ~89% |
+| Probation | ~87% |
+
+Failure space within each line's (100 - clean_threshold) is split 60% late / 30% short / 10% both. Aggregate OTIF rate is ~90%.
 
 ### Shipments
 | Attribute | Distribution | Values |
 |-----------|-------------|--------|
 | Transport Mode | Weighted | OCEAN: 40%, TRUCK: 20%, AIR: 20%, RAIL: 20% |
 | Transit Time | Mode-based | AIR: 3-7d, TRUCK: 2-8d, RAIL: 7-16d, OCEAN: 21-40d |
-| Arrival Variance | Offset | -1 to +3 days |
+| **Arrival Variance** | **Bucketed** | **See shipment outcome distribution below** |
 | Status | Time-based | DELIVERED (past ETA), IN_TRANSIT (future ETA), DAMAGED: 2% |
+
+**Shipment Arrival Outcome Distribution (delivered shipments only):**
+
+Each delivered shipment is assigned to one of four outcome buckets via `MOD(HASH(shipment_id, 4501), 100)`:
+
+| Bucket | % of Shipments | Arrival Variance | Description |
+|--------|---------------|------------------|-------------|
+| On-time/early | 85% | -2 to 0 days | Normal operations |
+| Slightly late | 10% | +1 to +3 days | Minor delay |
+| Late | 4% | +4 to +8 days | Significant delay |
+| Very late | 1% | +9 to +15 days | Severe delay (long tail) |
+
+This produces a carrier on-time rate of ~85% (DELIVERED shipments arriving on or before ETA), with a right-skewed arrival variance distribution.
 
 ### Receipts
 | Attribute | Distribution | Values |
@@ -147,7 +187,7 @@ TRANSPORT_LANES
 ### Consistency
 | Check | Status | Notes |
 |-------|--------|-------|
-| qty_received <= qty_ordered | PASS | Bounded to 90-105% for historical |
+| qty_received <= qty_ordered | PASS | 96% at 100%, 3% at 70-94%, 1% at 50-79% (historical) |
 | actual_date NULL when status=OPEN | PASS | Conditional logic ensures alignment |
 | OTIF flag aligned with dates | PASS | TRUE only when ship variance <= 0 AND status != PARTIAL |
 | Inventory reserved <= on_hand | PASS | Reserved capped at 40% of on-hand |
@@ -186,7 +226,7 @@ TRANSPORT_LANES
 
 5. **Determinism** - All randomness uses `HASH(key, seed)` with fixed integer seeds. Re-running the script on the same Snowflake version produces identical data.
 
-6. **OTIF rate** - The derived OTIF flag shows ~30-40% true, which is deliberately below world-class (~95%) to provide meaningful signal for the monitoring system to detect and improve.
+6. **OTIF rate** - Risk-correlated outcome bucketing produces ~90% aggregate OTIF, with a ~10pp spread from safest suppliers (OTD>=95: ~97%) to riskiest (probation: ~87%). Breach probability correlates with supplier OTD%, quality score, material criticality, single-sourced status, and probation — enabling the ML model to learn meaningful feature-outcome relationships.
 
 ---
 

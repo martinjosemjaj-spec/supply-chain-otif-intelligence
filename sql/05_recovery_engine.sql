@@ -125,6 +125,7 @@ SELECT
     CASE
         WHEN arl.days_until_due < 2 THEN FALSE  -- Too late to expedite
         WHEN arl.line_status = 'CANCELLED' THEN FALSE
+        WHEN COALESCE(tl.primary_mode, 'UNKNOWN') = 'AIR' THEN FALSE  -- Already fastest mode
         ELSE TRUE
     END AS is_feasible,
 
@@ -164,16 +165,16 @@ SELECT
             ELSE 0.10
         END, 4) AS otif_lift,
 
-    -- Incremental cost calculation
-    -- Premium freight = (weight * qty * air_rate) - (weight * qty * standard_rate)
+    -- Incremental cost = qty * weight * surcharge per kg for mode upgrade
+    -- Surcharge is always positive: the extra cost to jump to a faster mode
     ROUND(
-        arl.quantity_ordered * arl.weight_kg *
-        (CASE
-            WHEN tl.primary_mode = 'OCEAN' THEN 3.50  -- Air rate per kg
-            WHEN tl.primary_mode = 'RAIL' THEN 2.00
-            WHEN tl.primary_mode = 'TRUCK' THEN 1.50
-            ELSE 2.00
-        END - COALESCE(tl.cost_per_kg, 0.50))
+        arl.quantity_ordered * ABS(arl.weight_kg) *
+        CASE
+            WHEN tl.primary_mode = 'OCEAN' THEN 3.00  -- Ocean→Air surcharge
+            WHEN tl.primary_mode = 'RAIL'  THEN 1.50  -- Rail→Truck/Air surcharge
+            WHEN tl.primary_mode = 'TRUCK' THEN 0.75  -- Truck→Express surcharge
+            ELSE 1.00
+        END
     , 2) AS incremental_cost,
 
     -- Revenue protected
@@ -196,13 +197,13 @@ SELECT
             WHEN arl.days_until_due >= 2 THEN 0.50
             ELSE 0.10
         END
-        - arl.quantity_ordered * arl.weight_kg *
-        (CASE
-            WHEN tl.primary_mode = 'OCEAN' THEN 3.50
-            WHEN tl.primary_mode = 'RAIL' THEN 2.00
-            WHEN tl.primary_mode = 'TRUCK' THEN 1.50
-            ELSE 2.00
-        END - COALESCE(tl.cost_per_kg, 0.50))
+        - arl.quantity_ordered * ABS(arl.weight_kg) *
+        CASE
+            WHEN tl.primary_mode = 'OCEAN' THEN 3.00
+            WHEN tl.primary_mode = 'RAIL'  THEN 1.50
+            WHEN tl.primary_mode = 'TRUCK' THEN 0.75
+            ELSE 1.00
+        END
     , 2) AS net_value_protected,
 
     -- Context
@@ -562,25 +563,58 @@ WITH all_actions AS (
         alt_supplier_name,
         'Order from ' || COALESCE(alt_supplier_name, 'N/A') AS action_detail
     FROM OTIF_GUARDIAN.ML.V_ACTION_ALTERNATE_SUPPLIER
+),
+-- Rank only cost-positive feasible actions
+ranked AS (
+    SELECT
+        aa.*,
+        ROW_NUMBER() OVER (
+            PARTITION BY aa.po_line_id
+            ORDER BY
+                aa.net_value_protected DESC,
+                aa.success_probability DESC
+        ) AS action_rank,
+        CASE
+            WHEN aa.incremental_cost > 0
+            THEN ROUND(aa.net_value_protected / aa.incremental_cost, 2)
+            ELSE NULL
+        END AS roi_multiple
+    FROM all_actions aa
+    WHERE aa.is_feasible = TRUE
+      AND aa.net_value_protected > 0
+),
+-- Lines that have risk but no cost-positive action get NO_ACTION
+at_risk_lines AS (
+    SELECT DISTINCT po_line_id, breach_probability, days_until_due, line_value,
+           downstream_revenue_exposed
+    FROM all_actions
+),
+no_action_lines AS (
+    SELECT
+        arl.po_line_id,
+        'NO_ACTION' AS action_type,
+        TRUE AS is_feasible,
+        FALSE AS would_resolve_breach,
+        0 AS success_probability,
+        0 AS otif_lift,
+        0 AS incremental_cost,
+        0 AS revenue_protected,
+        0 AS net_value_protected,
+        arl.breach_probability,
+        arl.days_until_due,
+        arl.line_value,
+        arl.downstream_revenue_exposed,
+        NULL AS donor_plant_code,
+        NULL AS alt_supplier_name,
+        'No cost-effective recovery action available' AS action_detail,
+        1 AS action_rank,
+        NULL AS roi_multiple
+    FROM at_risk_lines arl
+    WHERE NOT EXISTS (SELECT 1 FROM ranked r WHERE r.po_line_id = arl.po_line_id)
 )
-SELECT
-    aa.*,
-    -- Rank within each PO line: best action = highest net value protected among feasible
-    ROW_NUMBER() OVER (
-        PARTITION BY aa.po_line_id
-        ORDER BY
-            aa.is_feasible DESC,            -- Feasible first
-            aa.net_value_protected DESC,     -- Highest net value
-            aa.success_probability DESC      -- Tiebreak: highest success rate
-    ) AS action_rank,
-    -- ROI = net_value / cost (only if cost > 0)
-    CASE
-        WHEN aa.incremental_cost > 0
-        THEN ROUND(aa.net_value_protected / aa.incremental_cost, 2)
-        ELSE NULL
-    END AS roi_multiple
-FROM all_actions aa
-WHERE aa.is_feasible = TRUE;
+SELECT * FROM ranked
+UNION ALL
+SELECT * FROM no_action_lines;
 
 
 -- ============================================================
@@ -616,6 +650,7 @@ SELECT
     COUNT_IF(action_rank = 1 AND action_type = 'EXPEDITE') AS recommended_expedites,
     COUNT_IF(action_rank = 1 AND action_type = 'INVENTORY_TRANSFER') AS recommended_transfers,
     COUNT_IF(action_rank = 1 AND action_type = 'ALTERNATE_SUPPLIER') AS recommended_alt_suppliers,
+    COUNT_IF(action_rank = 1 AND action_type = 'NO_ACTION') AS no_cost_effective_action,
 
     -- ROI
     ROUND(

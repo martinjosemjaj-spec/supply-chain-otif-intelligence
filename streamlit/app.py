@@ -1,9 +1,18 @@
 """
 OTIF Guardian - Production Streamlit Application
-Main entry point with page routing.
+Main entry point with hero branding, sidebar filters, and page navigation.
+Spec: SKILL.md S4, S5
 """
 
 import streamlit as st
+import sys, os
+
+sys.path.insert(0, os.path.dirname(__file__))
+from lib.data import is_demo_mode, get_plants
+from lib.config import (
+    RISK_BANDS, DEFAULT_RISK_BANDS, DEFAULT_MIN_REVENUE,
+    REVENUE_STEP, PLANNING_HORIZON_DAYS,
+)
 
 st.set_page_config(
     page_title="OTIF Guardian",
@@ -12,12 +21,125 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Pages
-executive_dashboard = st.Page("pages/01_executive_dashboard.py", title="Executive Dashboard", icon="📊", default=True)
-risk_center = st.Page("pages/02_risk_center.py", title="Risk Center", icon="⚠️")
-recovery_center = st.Page("pages/03_recovery_center.py", title="Recovery Center", icon="🔧")
-governed_copilot = st.Page("pages/04_governed_copilot.py", title="Governed Copilot", icon="💬")
-settings = st.Page("pages/05_settings.py", title="Settings", icon="⚙️")
+# ── Hero Header ──────────────────────────────────────────────
+st.markdown(
+    """
+    <div style="background: linear-gradient(135deg, #061B31 0%, #0B365B 50%, #075985 100%);
+                padding: 1.5rem 2rem; border-radius: 10px; margin-bottom: 1rem;">
+        <h1 style="color: #ffffff; margin: 0; font-size: 2rem;">🛡️ OTIF Guardian</h1>
+        <p style="color: #93c5fd; margin: 0.3rem 0 0.8rem 0; font-size: 0.95rem;">
+            Predict inbound supply failure. Trace customer exposure.
+            Compare feasible recovery actions.
+        </p>
+        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+            <span style="background: rgba(255,255,255,0.15); color: #e0e7ff;
+                         padding: 0.2rem 0.7rem; border-radius: 12px; font-size: 0.75rem;">
+                Decision support — no ERP writes</span>
+            <span style="background: rgba(255,255,255,0.15); color: #e0e7ff;
+                         padding: 0.2rem 0.7rem; border-radius: 12px; font-size: 0.75rem;">
+                Deterministic SQL engine</span>
+            <span style="background: rgba(255,255,255,0.15); color: #e0e7ff;
+                         padding: 0.2rem 0.7rem; border-radius: 12px; font-size: 0.75rem;">
+                XGBoost + SHAP</span>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
-pg = st.navigation([executive_dashboard, risk_center, recovery_center, governed_copilot, settings])
-pg.run()
+if is_demo_mode():
+    st.warning("🔶 DEMO MODE — Running with synthetic data. Not connected to Snowflake.")
+
+# ── Sidebar: Scope & Filters (SKILL.md S5) ──────────────────
+st.sidebar.markdown(
+    """
+    <div style="text-align:center; padding: 0.3rem 0 0.8rem 0;">
+        <span style="font-size:1.8rem;">🛡️</span>
+        <h3 style="margin:0; font-size:1.1rem;">OTIF Guardian</h3>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+st.sidebar.divider()
+
+# Plant selector
+try:
+    plants_df = get_plants()
+    plant_options = ["All"] + plants_df["PLANT_CODE"].tolist()
+    plant_names = {"All": "All Plants"}
+    for _, r in plants_df.iterrows():
+        plant_names[r["PLANT_CODE"]] = f"{r['PLANT_CODE']} — {r['PLANT_NAME']}"
+except Exception:
+    plant_options = ["All"]
+    plant_names = {"All": "All Plants"}
+
+selected_plant = st.sidebar.selectbox(
+    "Plant",
+    plant_options,
+    format_func=lambda x: plant_names.get(x, x),
+    key="filter_plant",
+)
+
+# Risk-band multiselect
+selected_bands = st.sidebar.multiselect(
+    "Risk Bands",
+    RISK_BANDS,
+    default=DEFAULT_RISK_BANDS,
+    key="filter_bands",
+)
+
+# Minimum revenue
+min_revenue = st.sidebar.number_input(
+    "Min At-Risk Revenue ($)",
+    min_value=0,
+    value=DEFAULT_MIN_REVENUE,
+    step=REVENUE_STEP,
+    key="filter_min_revenue",
+)
+
+st.sidebar.divider()
+
+# Navigation
+page = st.sidebar.radio(
+    "Navigation",
+    [
+        "📊  Risk Command Center",
+        "🔍  PO Decision Detail",
+        "💬  Governed Copilot",
+        "⚙️  Model & Controls",
+        "───────────────",
+        "📈  Executive Dashboard",
+        "⚠️  Risk Center (legacy)",
+        "🔧  Recovery Center (legacy)",
+        "📋  Settings (legacy)",
+    ],
+    label_visibility="collapsed",
+)
+
+st.sidebar.divider()
+st.sidebar.caption(
+    "**Governance:** All financial calculations are deterministic SQL. "
+    "ML predictions use XGBoost with SHAP explainability. "
+    "No ERP writes."
+)
+st.sidebar.caption(f"v2.0 | {'Demo' if is_demo_mode() else 'Live'} mode")
+
+# ── Page Router ──────────────────────────────────────────────
+if "Risk Command Center" in page:
+    exec(open("pages/10_risk_command_center.py").read())
+elif "PO Decision Detail" in page:
+    exec(open("pages/11_po_decision_detail.py").read())
+elif "Governed Copilot" in page:
+    exec(open("pages/12_governed_copilot.py").read())
+elif "Model & Controls" in page:
+    exec(open("pages/13_model_controls.py").read())
+elif "Executive Dashboard" in page:
+    exec(open("pages/01_executive_dashboard.py").read())
+elif "Risk Center" in page:
+    exec(open("pages/02_risk_center.py").read())
+elif "Recovery Center" in page:
+    exec(open("pages/03_recovery_center.py").read())
+elif "Settings" in page:
+    exec(open("pages/05_settings.py").read())
+elif "───" in page:
+    st.info("Select a page from the navigation above.")

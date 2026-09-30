@@ -9,15 +9,17 @@ sys.path.insert(0, "..")
 from lib.data import (
     get_session, get_model_version, get_prediction_time,
     get_data_freshness, get_model_metrics, get_confusion_matrix,
-    run_query
+    run_query, fmt_number
 )
 
-st.title("Settings")
+# ── Page Header ──────────────────────────────────────────────
+st.markdown("## ⚙️ Settings")
+st.caption("System status, model performance, and configuration")
 
-# ══════════════════════════════════════════════════════════════
-# Section 1: Connection Info
-# ══════════════════════════════════════════════════════════════
-st.subheader("Connection")
+st.markdown("---")
+
+# ── Connection Info ──────────────────────────────────────────
+st.markdown("### Connection")
 
 try:
     conn_info = run_query("""
@@ -33,23 +35,21 @@ try:
         row = conn_info.iloc[0]
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.text_input("Account", value=row["ACCOUNT"], disabled=True)
-            st.text_input("User", value=row["USER_NAME"], disabled=True)
+            st.markdown(f"**Account:** `{row['ACCOUNT']}`")
+            st.markdown(f"**User:** `{row['USER_NAME']}`")
         with col2:
-            st.text_input("Role", value=row["ROLE_NAME"], disabled=True)
-            st.text_input("Warehouse", value=row["WAREHOUSE"], disabled=True)
+            st.markdown(f"**Role:** `{row['ROLE_NAME']}`")
+            st.markdown(f"**Warehouse:** `{row['WAREHOUSE']}`")
         with col3:
-            st.text_input("Database", value=str(row["DATABASE_NAME"]), disabled=True)
-            st.text_input("Schema", value=str(row["SCHEMA_NAME"]), disabled=True)
+            st.markdown(f"**Database:** `{row['DATABASE_NAME']}`")
+            st.markdown(f"**Schema:** `{row['SCHEMA_NAME']}`")
 except Exception as e:
     st.error(f"Failed to get connection info: {e}")
 
-st.divider()
+st.markdown("---")
 
-# ══════════════════════════════════════════════════════════════
-# Section 2: Model Version & Performance
-# ══════════════════════════════════════════════════════════════
-st.subheader("Model Version")
+# ── Model Version & Performance ──────────────────────────────
+st.markdown("### Model Performance")
 
 col1, col2 = st.columns(2)
 
@@ -68,56 +68,64 @@ with col2:
         metrics = get_model_metrics()
         if not metrics.empty:
             m = metrics.iloc[0]
-            st.metric("Accuracy", f"{m.get('ACCURACY', 0):.4f}")
-            st.metric("F1 (Breach)", f"{m.get('F1_BREACH', 0):.4f}")
-            st.metric("Recall (Breach)", f"{m.get('RECALL_BREACH', 0):.4f}")
-            st.metric("Precision (Breach)", f"{m.get('PRECISION_BREACH', 0):.4f}")
+            m1, m2 = st.columns(2)
+            with m1:
+                st.metric("Accuracy", f"{m.get('ACCURACY', 0):.4f}")
+                st.metric("F1 (Breach)", f"{m.get('F1_BREACH', 0):.4f}")
+            with m2:
+                st.metric("Recall (Breach)", f"{m.get('RECALL_BREACH', 0):.4f}")
+                st.metric("Precision (Breach)", f"{m.get('PRECISION_BREACH', 0):.4f}")
     except Exception:
         st.info("Model metrics not available.")
 
-st.divider()
+st.markdown("---")
 
-# ══════════════════════════════════════════════════════════════
-# Section 3: Confusion Matrix
-# ══════════════════════════════════════════════════════════════
-st.subheader("Confusion Matrix (Test Set)")
+# ── Confusion Matrix ─────────────────────────────────────────
+st.markdown("### Confusion Matrix (Test Set)")
 
 try:
     cm = get_confusion_matrix()
     if not cm.empty:
-        st.dataframe(cm, use_container_width=True, hide_index=True)
+        # Format as readable table
+        formatted = cm.copy()
+        formatted.columns = ["Actual", "Predicted", "Count"]
+        formatted["Actual"] = formatted["Actual"].map({0: "No Breach", 1: "Breach"})
+        formatted["Predicted"] = formatted["Predicted"].map({0: "No Breach", 1: "Breach"})
+        formatted["Count"] = formatted["Count"].apply(lambda x: f"{int(x):,}")
+        st.dataframe(formatted, use_container_width=True)
     else:
         st.info("No confusion matrix data. Train the model first.")
 except Exception as e:
     st.error(f"{e}")
 
-st.divider()
+st.markdown("---")
 
-# ══════════════════════════════════════════════════════════════
-# Section 4: Data Freshness
-# ══════════════════════════════════════════════════════════════
-st.subheader("Data Freshness")
+# ── Data Freshness ───────────────────────────────────────────
+st.markdown("### Data Freshness")
 
 try:
     freshness = get_data_freshness()
     if not freshness.empty:
-        st.dataframe(freshness, use_container_width=True, hide_index=True)
+        for _, row in freshness.iterrows():
+            col1, col2 = st.columns([1, 2])
+            with col1:
+                st.markdown(f"**{row['SOURCE_TABLE']}**")
+            with col2:
+                st.markdown(f"`{row['LAST_UPDATED']}`")
     else:
         st.info("Unable to determine data freshness.")
 except Exception as e:
     st.error(f"{e}")
 
-st.divider()
+st.markdown("---")
 
-# ══════════════════════════════════════════════════════════════
-# Section 5: Decision Trace Configuration
-# ══════════════════════════════════════════════════════════════
-st.subheader("Decision Trace")
+# ── Decision Trace Configuration ─────────────────────────────
+st.markdown("### Decision Trace")
 
 st.markdown("""
 | Component | Trace Method | Description |
 |-----------|-------------|-------------|
-| ML Predictions | SHAP Reason Codes | Per-prediction feature contributions via `EXPLAIN()` |
+| ML Predictions | SHAP Reason Codes | Per-prediction feature contributions |
 | Recovery Actions | Deterministic SQL | All cost/benefit calculations in SQL views |
 | Copilot Answers | Agent Tool Calls | Traces which tools were invoked per response |
 | Data Pipeline | Temporal Split | Train/test split prevents future data leakage |
@@ -129,12 +137,10 @@ st.caption(
     "or financial impact calculations."
 )
 
-st.divider()
+st.markdown("---")
 
-# ══════════════════════════════════════════════════════════════
-# Section 6: Object Inventory
-# ══════════════════════════════════════════════════════════════
-st.subheader("Object Inventory")
+# ── Object Inventory ─────────────────────────────────────────
+st.markdown("### Object Inventory")
 
 if st.button("Refresh Object Counts"):
     try:
@@ -156,14 +162,17 @@ if st.button("Refresh Object Counts"):
             FROM INFORMATION_SCHEMA.TABLES
             WHERE TABLE_SCHEMA = 'ML' AND TABLE_CATALOG = 'OTIF_GUARDIAN'
         """)
-        st.dataframe(inventory, use_container_width=True, hide_index=True)
+        for _, row in inventory.iterrows():
+            col1, col2 = st.columns([2, 1])
+            with col1:
+                st.markdown(f"**{row['OBJECT_TYPE']}**")
+            with col2:
+                st.markdown(f"`{int(row['COUNT']):,}`")
     except Exception as e:
         st.error(f"{e}")
 
-# ══════════════════════════════════════════════════════════════
-# Section 7: Recovery Engine Log
-# ══════════════════════════════════════════════════════════════
-st.subheader("Recovery Engine Execution Log")
+# ── Recovery Engine Log ──────────────────────────────────────
+st.markdown("### Recovery Engine Execution Log")
 
 try:
     log = run_query("""
@@ -172,7 +181,7 @@ try:
         LIMIT 10
     """)
     if not log.empty:
-        st.dataframe(log, use_container_width=True, hide_index=True)
+        st.dataframe(log, use_container_width=True)
     else:
         st.info("No execution history. Run the recovery engine to populate.")
 except Exception as e:

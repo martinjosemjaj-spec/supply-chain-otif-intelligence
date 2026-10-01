@@ -1,0 +1,213 @@
+# OTIF Guardian - Environment Configuration
+# Each environment defines Snowflake targets, deployment behavior, and required gates.
+
+environments:
+  DEV:
+    database: OTIF_GUARDIAN_DEV
+    warehouse: OTIF_GUARDIAN_WH
+    role: OTIF_GUARDIAN_ADMIN
+    generate_data: true
+    auto_deploy_branch: dev
+    required_gates: [python_tests, sql_tests]
+    deployment_approval: false
+    rollback_mode: automatic
+
+  UAT:
+    database: OTIF_GUARDIAN_UAT
+    warehouse: OTIF_GUARDIAN_WH
+    role: OTIF_GUARDIAN_ADMIN
+    generate_data: true
+    auto_deploy_branch: null  # manual trigger only
+    required_gates:
+      - python_tests
+      - sql_tests
+      - data_quality
+      - feature_validation
+      - xgboost_validation
+      - semantic_validation
+      - agent_evaluation
+    deployment_approval: false
+    rollback_mode: manual
+
+  PROD:
+    database: OTIF_GUARDIAN
+    warehouse: OTIF_GUARDIAN_WH
+    role: OTIF_GUARDIAN_ADMIN
+    generate_data: false  # uses real ingested data
+    auto_deploy_branch: null  # manual trigger only
+    required_gates:
+      - python_tests
+      - sql_tests
+      - data_quality
+      - feature_validation
+      - xgboost_validation
+      - semantic_validation
+      - agent_evaluation
+      - security_tests
+      - streamlit_smoke
+    deployment_approval: true
+    rollback_mode: manual
+
+# Deployment stages executed in dependency order.
+# Each stage lists SQL scripts and validation gates that must pass before proceeding.
+stages:
+  - name: data_foundation
+    order: 1
+    scripts:
+      - sql/00_bootstrap.sql
+      - sql/01_generate_data.sql  # skipped in PROD (generate_data: false)
+    gate: null
+    description: Database, schemas, roles, warehouse, raw data
+
+  - name: ontology
+    order: 2
+    scripts:
+      - sql/02_ontology_views.sql
+    gate: sql_tests
+    description: Analytics views (11 ontology views)
+
+  - name: semantic_layer
+    order: 3
+    scripts:
+      - sql/03_deploy_semantic_view.sql
+    commands:
+      - cortex agent-studio sv-deploy
+    gate: null
+    description: Semantic view YAML upload and deploy
+
+  - name: ml_pipeline
+    order: 4
+    scripts:
+      - sql/04_ml_pipeline.sql
+      - sql/04b_ml_pipeline_improved.sql
+    gate: feature_validation
+    description: Feature engineering, model training, scoring
+
+  - name: model_hardening
+    order: 5
+    scripts:
+      - sql/07_model_registry.sql
+      - sql/10_feature_registry.sql
+      - sql/11_model_hardening.sql
+    gate: xgboost_validation
+    description: Model registry, hardened training, promotion gates
+
+  - name: recovery_engine
+    order: 6
+    scripts:
+      - sql/05_recovery_engine.sql
+      - python/recovery_procedures.sql
+    gate: null
+    description: Recovery actions, simulation, portfolio summary
+
+  - name: decision_layer
+    order: 7
+    scripts:
+      - sql/13_decision_layer_hardening.sql
+    gate: data_quality
+    description: Deterministic calculations, governed assumptions
+
+  - name: monitoring
+    order: 8
+    scripts:
+      - sql/08_monitoring.sql
+      - sql/09_data_quality.sql
+      - sql/12_production_monitoring.sql
+    gate: null
+    description: Drift, DQ, production monitoring infrastructure
+
+  - name: governance
+    order: 9
+    scripts:
+      - sql/14_semantic_governance.sql
+      - sql/16_evidence_framework.sql
+      - sql/17_security_hardening.sql
+    gate: security_tests
+    description: Metric registry, evidence views, RBAC, masking
+
+  - name: agent
+    order: 10
+    scripts:
+      - sql/06_deploy_agent.sql
+      - sql/15_agent_hardening.sql
+    commands:
+      - cortex agent-studio agent-deploy
+    gate: agent_evaluation
+    description: Cortex Agent deploy, guardrails, evaluation
+
+  - name: streamlit
+    order: 11
+    scripts: []
+    commands:
+      - snow streamlit deploy
+    gate: streamlit_smoke
+    description: Streamlit application deployment
+
+# Validation gate definitions mapping to test sources
+gates:
+  python_tests:
+    type: pytest
+    command: python -m pytest tests/test_app.py -v
+    mandatory: true
+    description: Unit tests (demo mode, no Snowflake needed)
+
+  sql_tests:
+    type: sql_file
+    file: tests/test_sql.sql
+    mandatory: true
+    description: Bootstrap, data integrity, referential integrity, ontology views
+
+  data_quality:
+    type: snowflake_procedure
+    procedure: AUDIT.SP_RUN_PRODUCTION_MONITORING
+    pass_key: overall_status
+    pass_value: HEALTHY,WARNING  # CRITICAL fails
+    mandatory: true
+    description: 90 production monitoring checks (feature drift, scoring freshness, etc.)
+
+  feature_validation:
+    type: sql_file
+    file: tests/test_ml.sql
+    filter: T-ML-001,T-ML-002,T-ML-003,T-ML-004,T-ML-005,T-ML-006,T-ML-007,T-ML-008,T-ML-009,T-ML-010
+    mandatory: true
+    description: Feature leakage, temporal split, class balance, data size
+
+  xgboost_validation:
+    type: snowflake_procedure
+    procedure: ML.SP_VALIDATE_MODEL_INDEPENDENTLY
+    args: ["V3"]
+    pass_key: overall_status
+    pass_value: PASS
+    mandatory: true
+    description: Model promotion gates (ROC-AUC>=0.85, Recall>=0.60, F1>=0.40)
+
+  semantic_validation:
+    type: snowflake_procedure
+    procedure: AUDIT.SP_VALIDATE_SEMANTIC_LAYER
+    pass_key: overall_status
+    pass_value: PASS
+    mandatory: true
+    description: 32 semantic layer validation tests
+
+  agent_evaluation:
+    type: snowflake_procedure
+    procedure: AUDIT.SP_RUN_AGENT_EVALUATION
+    args: ["PROD"]
+    pass_key: deployment_gate
+    pass_value: PASS
+    mandatory: true
+    description: 30 agent evaluation questions across 7 categories
+
+  security_tests:
+    type: snowflake_procedure
+    procedure: AUDIT.SP_VALIDATE_SECURITY_POSTURE
+    pass_key: overall_status
+    pass_value: SECURE
+    mandatory: true
+    description: 12 RBAC, masking, and row access policy tests
+
+  streamlit_smoke:
+    type: command
+    command: snow streamlit get-url --database {database} --schema STREAMLIT
+    mandatory: false
+    description: Verify Streamlit app is accessible

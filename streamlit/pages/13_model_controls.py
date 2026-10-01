@@ -11,15 +11,90 @@ from lib.data import (
     get_model_version_str, get_model_metrics, get_confusion_matrix,
     get_feature_importance, get_data_freshness, get_prediction_time,
     get_scoring_time, run_query, is_demo_mode, fmt_number,
+    get_operational_summary, get_operational_detail,
 )
 from lib.config import OBJECTS
 
 # ── Header ───────────────────────────────────────────────────
 st.markdown("### Model & Controls")
-st.caption("Model performance, governance controls, and data provenance")
+st.caption("Operational health, model performance, governance controls, and data provenance")
 
 if is_demo_mode():
     st.warning("DEMO MODE — Metrics shown are from demo fixtures, not a production model.")
+
+st.markdown("---")
+
+# ── System Health (4 domains) ─────────────────────────────────
+st.markdown("#### System Health")
+
+try:
+    with st.spinner("Loading operational health..."):
+        ops = get_operational_summary()
+    if not ops.empty:
+        domain_cols = st.columns(4)
+        status_colors = {"HEALTHY": "#36B37E", "WARNING": "#FFAB00", "CRITICAL": "#DE350B"}
+        status_icons = {"HEALTHY": "HEALTHY", "WARNING": "WARNING", "CRITICAL": "CRITICAL"}
+
+        for i, (_, row) in enumerate(ops.iterrows()):
+            domain = row["DOMAIN"]
+            status = row["DOMAIN_STATUS"]
+            color = status_colors.get(status, "#888")
+            with domain_cols[i]:
+                st.markdown(
+                    f'<div style="border:2px solid {color}; border-radius:8px; '
+                    f'padding:0.8rem; text-align:center; min-height:140px;">'
+                    f'<div style="font-size:0.85rem; color:#666; text-transform:uppercase; '
+                    f'letter-spacing:0.05rem;">{domain}</div>'
+                    f'<div style="font-size:1.4rem; font-weight:700; color:{color}; '
+                    f'margin:0.3rem 0;">{status_icons.get(status, status)}</div>'
+                    f'<div style="font-size:0.78rem; color:#888;">'
+                    f'{int(row["HEALTHY"])}/{int(row["TOTAL_CHECKS"])} checks OK</div>'
+                    f'<div style="font-size:0.72rem; color:#aaa; margin-top:0.2rem;">'
+                    f'v{row["MODEL_VERSION"] or "?"} | {str(row["LAST_CHECKED"])[:16]}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+        st.markdown("")
+
+        # Drilldown for non-HEALTHY domains
+        problem_domains = ops[ops["DOMAIN_STATUS"] != "HEALTHY"]
+        if not problem_domains.empty:
+            st.markdown("##### Issues Requiring Attention")
+            for _, row in problem_domains.iterrows():
+                domain = row["DOMAIN"]
+                status = row["DOMAIN_STATUS"]
+                color = status_colors.get(status, "#888")
+                w = int(row["WARNINGS"])
+                c = int(row["CRITICAL"])
+                st.markdown(
+                    f'<div style="background:{color}15; border-left:3px solid {color}; '
+                    f'padding:0.5rem 0.8rem; border-radius:4px; margin-bottom:0.4rem; '
+                    f'font-size:0.85rem;">'
+                    f'<b>{domain}</b>: {c} critical, {w} warnings out of '
+                    f'{int(row["TOTAL_CHECKS"])} checks</div>',
+                    unsafe_allow_html=True,
+                )
+
+            # Show detail rows for problem domains
+            if not is_demo_mode():
+                with st.expander("Detailed findings", expanded=False):
+                    for _, row in problem_domains.iterrows():
+                        detail = get_operational_detail(row["DOMAIN"])
+                        if not detail.empty:
+                            issues = detail[detail["STATUS"] != "HEALTHY"]
+                            if not issues.empty:
+                                st.markdown(f"**{row['DOMAIN']}**")
+                                for _, d in issues.iterrows():
+                                    st.markdown(
+                                        f"- [{d['STATUS']}] {d['SUBDOMAIN']}: "
+                                        f"{d['METRIC_LABEL'] or ''} — {d['DETAIL'] or ''}"
+                                    )
+        else:
+            st.success("All systems operational.")
+    else:
+        st.info("No operational health data available.")
+except Exception as e:
+    st.error(f"Unable to load system health: {e}")
 
 st.markdown("---")
 

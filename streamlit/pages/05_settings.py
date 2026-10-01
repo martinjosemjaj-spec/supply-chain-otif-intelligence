@@ -176,8 +176,9 @@ st.markdown("### Recovery Engine Execution Log")
 
 try:
     log = run_query("""
-        SELECT * FROM OTIF_GUARDIAN.ML.RECOVERY_ENGINE_LOG
-        ORDER BY execution_timestamp DESC
+        SELECT EXECUTION_TIMESTAMP, STATUS, LINES_PROCESSED, DURATION_SECONDS
+        FROM OTIF_GUARDIAN.ML.RECOVERY_ENGINE_LOG
+        ORDER BY EXECUTION_TIMESTAMP DESC
         LIMIT 10
     """)
     if not log.empty:

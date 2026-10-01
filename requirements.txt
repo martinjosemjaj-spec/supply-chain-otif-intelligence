@@ -1,0 +1,13 @@
+# OTIF Guardian - Development & CI Dependencies
+# Snowflake
+snowflake-connector-python>=3.6.0
+snowflake-snowpark-python>=1.17.0
+
+# Testing
+pytest>=7.4.0
+flake8>=6.1.0
+pyyaml>=6.0
+
+# Streamlit (local dev only - SiS provides its own runtime)
+streamlit>=1.30.0
+pandas>=2.0.0

@@ -1,0 +1,161 @@
+# OTIF Guardian - Deployment Pipeline
+# Deploys to DEV/UAT/PROD with validation gates between stages.
+# Requires Snowflake connection via key-pair authentication.
+
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options:
+          - DEV
+          - UAT
+          - PROD
+      stage:
+        description: "Deploy specific stage only (leave empty for full deploy)"
+        required: false
+        type: string
+      from_stage:
+        description: "Start from stage number (leave empty for stage 1)"
+        required: false
+        type: string
+      dry_run:
+        description: "Dry run (print plan only)"
+        required: false
+        type: boolean
+        default: false
+      verify_only:
+        description: "Run validation gates only (no deployment)"
+        required: false
+        type: boolean
+        default: false
+
+  # Auto-deploy to DEV on push to dev branch
+  push:
+    branches: [dev]
+
+concurrency:
+  group: deploy-${{ github.event.inputs.environment || 'DEV' }}
+  cancel-in-progress: false
+
+env:
+  SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+  SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
+  SNOWFLAKE_PRIVATE_KEY_PATH: /tmp/snowflake_key.p8
+  SNOWFLAKE_AUTHENTICATOR: snowflake
+
+jobs:
+  # ── Gate 1: Python Tests (all environments) ─────────────────
+  python_tests:
+    name: "G1: Python Tests"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install pytest streamlit pandas snowflake-snowpark-python
+      - name: Run pytest
+        env:
+          OTIF_GUARDIAN_MODE: demo
+        run: python -m pytest tests/test_app.py -v --tb=short
+
+  # ── Gate 2: SQL Tests (requires Snowflake) ──────────────────
+  sql_tests:
+    name: "G2: SQL Tests"
+    needs: python_tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install snowflake-connector-python pyyaml
+      - name: Write Snowflake key
+        run: echo "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/snowflake_key.p8
+      - name: Run SQL tests
+        env:
+          SNOWFLAKE_DATABASE: ${{ github.event.inputs.environment == 'PROD' && 'OTIF_GUARDIAN' || github.event.inputs.environment == 'UAT' && 'OTIF_GUARDIAN_UAT' || 'OTIF_GUARDIAN_DEV' }}
+        run: python scripts/run_sql_tests.py --all
+
+  # ── Deploy Stages (dependency-ordered) ──────────────────────
+  deploy:
+    name: "Deploy to ${{ github.event.inputs.environment || 'DEV' }}"
+    needs: [python_tests, sql_tests]
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'DEV' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install snowflake-connector-python pyyaml cryptography
+
+      - name: Write Snowflake key
+        run: echo "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/snowflake_key.p8
+
+      - name: Set environment
+        id: env
+        run: |
+          ENV="${{ github.event.inputs.environment || 'DEV' }}"
+          echo "env_name=$ENV" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy (or verify/dry-run)
+        env:
+          SNOWFLAKE_DATABASE: ${{ steps.env.outputs.env_name == 'PROD' && 'OTIF_GUARDIAN' || steps.env.outputs.env_name == 'UAT' && 'OTIF_GUARDIAN_UAT' || 'OTIF_GUARDIAN_DEV' }}
+        run: |
+          ARGS="--env ${{ steps.env.outputs.env_name }}"
+
+          if [ "${{ github.event.inputs.verify_only }}" = "true" ]; then
+            ARGS="$ARGS --verify"
+          elif [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+
+          if [ -n "${{ github.event.inputs.stage }}" ]; then
+            ARGS="$ARGS --stage ${{ github.event.inputs.stage }}"
+          fi
+
+          if [ -n "${{ github.event.inputs.from_stage }}" ]; then
+            ARGS="$ARGS --from-stage ${{ github.event.inputs.from_stage }}"
+          fi
+
+          python scripts/deploy.py $ARGS
+
+  # ── Post-Deploy Validation (PROD only) ──────────────────────
+  post_deploy_validation:
+    name: "Post-Deploy Validation"
+    needs: deploy
+    if: github.event.inputs.environment == 'PROD' || github.event.inputs.environment == 'UAT'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install snowflake-connector-python pyyaml
+      - name: Write Snowflake key
+        run: echo "${{ secrets.SNOWFLAKE_PRIVATE_KEY }}" > /tmp/snowflake_key.p8
+      - name: Run all required gates
+        env:
+          SNOWFLAKE_DATABASE: ${{ github.event.inputs.environment == 'PROD' && 'OTIF_GUARDIAN' || 'OTIF_GUARDIAN_UAT' }}
+        run: |
+          python scripts/run_snowflake_validations.py \
+            --all-required \
+            --env ${{ github.event.inputs.environment }}
+
+      - name: Run SQL integration tests
+        env:
+          SNOWFLAKE_DATABASE: ${{ github.event.inputs.environment == 'PROD' && 'OTIF_GUARDIAN' || 'OTIF_GUARDIAN_UAT' }}
+        run: python scripts/run_sql_tests.py --all

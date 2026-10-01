@@ -7,7 +7,7 @@ Spec: SKILL.md S8
 import streamlit as st
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from lib.data import run_agent_query, is_demo_mode
+from lib.data import run_agent_query, is_demo_mode, get_system_status
 
 # ── Header ───────────────────────────────────────────────────
 st.markdown("### Governed Copilot")
@@ -25,6 +25,12 @@ st.info(
 # ── Session State ────────────────────────────────────────────
 if "copilot_history" not in st.session_state:
     st.session_state.copilot_history = []
+
+# ── Clear History ────────────────────────────────────────────
+if st.session_state.copilot_history:
+    if st.button("Clear conversation", key="clear_copilot"):
+        st.session_state.copilot_history = []
+        st.rerun()
 
 # ── Suggested Questions ──────────────────────────────────────
 st.markdown("#### Suggested Questions")
@@ -67,7 +73,7 @@ for entry in st.session_state.copilot_history:
             unsafe_allow_html=True,
         )
     if "trace" in entry and entry["trace"]:
-        with st.expander("🔍 Evidence / Raw Response"):
+        with st.expander("Evidence / Raw Response"):
             st.code(entry["trace"], language="json")
 
 # ── Input ────────────────────────────────────────────────────
@@ -105,8 +111,21 @@ if (send_btn or clicked_suggestion) and user_input and user_input.strip():
                     unsafe_allow_html=True,
                 )
                 if trace:
-                    with st.expander("🔍 Evidence / Raw Response"):
+                    with st.expander("Evidence / Raw Response"):
                         st.code(trace, language="json")
+
+                # Evidence badges
+                _s = get_system_status()
+                st.markdown(
+                    f'<div style="display:flex; gap:1rem; font-size:0.78rem; color:#666; '
+                    f'margin-top:0.3rem;">'
+                    f'<span>Source: governed SQL tools</span>'
+                    f'<span>Model: {_s["model_version"]}</span>'
+                    f'<span>Data as of: {_s["data_freshness"]}</span>'
+                    f'<span>Calculation: deterministic</span>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
             except Exception as e:
                 error_msg = f"Agent call failed: {e}"
                 st.error(error_msg)

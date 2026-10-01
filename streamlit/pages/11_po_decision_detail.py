@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from lib.data import (
     get_po_detail, get_po_reason_codes, get_po_recovery_options,
     get_risk_command_center, get_model_version_str, get_prediction_time,
-    get_scoring_time,
+    get_scoring_time, get_evidence_package, get_evidence_recovery,
     fmt_dollar, fmt_prob, fmt_number, fmt_days, is_demo_mode, unavailable_msg,
 )
 
@@ -77,7 +77,7 @@ st.markdown(
 )
 
 # ── Model Provenance ─────────────────────────────────────────
-with st.expander("Model & Scoring Provenance", expanded=False):
+with st.expander("Model & Scoring Provenance", expanded=True):
     p1, p2, p3 = st.columns(3)
     with p1:
         st.markdown(f"**Model Version:** `{get_model_version_str()}`")
@@ -127,7 +127,8 @@ st.caption("Per-prediction feature contributions from XGBoost model. "
            "Positive = increases breach risk.")
 
 try:
-    reasons = get_po_reason_codes(selected_id)
+    with st.spinner("Loading reason codes..."):
+        reasons = get_po_reason_codes(selected_id)
     if not reasons.empty:
         display_r = reasons.copy()
         display_r["SHAP_CONTRIBUTION"] = display_r["SHAP_CONTRIBUTION"].apply(
@@ -148,7 +149,8 @@ st.caption("Feasible recovery actions ranked by action rank, then net value prot
            "Read-only — human approval required before execution.")
 
 try:
-    recovery = get_po_recovery_options(selected_id)
+    with st.spinner("Loading recovery options..."):
+        recovery = get_po_recovery_options(selected_id)
     if not recovery.empty:
         display_rec = recovery.copy()
         # Format columns
@@ -205,6 +207,58 @@ with st.expander("Unavailable prototype fields", expanded=False):
                   "SUPPLIER_OTIF_90D", "INVENTORY_DOS",
                   "REJECTION_REASON", "ACTION_QTY", "RECOVERED_UNITS", "ARRIVAL_DATE"]:
         st.markdown(f"- **{field}**: {unavailable_msg(field)}")
+
+st.markdown("---")
+
+# ── Evidence & Provenance Panel ──────────────────────────────
+st.markdown("#### Evidence & Provenance")
+st.caption("All values are deterministic SQL from governed Snowflake views. "
+           "No LLM-generated calculations.")
+
+try:
+    evidence = get_evidence_package(selected_id)
+    if not evidence.empty:
+        ev = evidence.iloc[0]
+        e1, e2, e3, e4 = st.columns(4)
+        with e1:
+            st.markdown(f"**Model Version**")
+            st.code(str(ev.get("MODEL_VERSION", "N/A")))
+        with e2:
+            st.markdown(f"**Feature Set**")
+            st.code(str(ev.get("FEATURE_SET_VERSION", "N/A")))
+        with e3:
+            st.markdown(f"**Data Freshness**")
+            ts = ev.get("DATA_FRESHNESS_TIMESTAMP", "N/A")
+            st.code(str(ts)[:19] if ts else "N/A")
+        with e4:
+            st.markdown(f"**Calculation Type**")
+            st.code(str(ev.get("CALCULATION_TYPE", "DETERMINISTIC")))
+
+        with st.expander("Full Evidence Trace", expanded=False):
+            st.markdown(f"**Source Views**: `{ev.get('SOURCE_GOVERNED_VIEWS', 'N/A')}`")
+            st.markdown(f"**Scored With**: Model `{ev.get('SCORED_WITH_VERSION', 'N/A')}`")
+            st.markdown(f"**Exposure Formula**: `line_value * breach_prob + downstream_prob_weighted`")
+            st.markdown(f"**Recovery Formula**: `revenue_protected - recovery_cost` (governed assumptions)")
+
+            # Show reason codes from evidence JSON
+            reasons = ev.get("TOP_REASONS")
+            if reasons is not None:
+                import json
+                try:
+                    reason_list = json.loads(reasons) if isinstance(reasons, str) else reasons
+                    if reason_list:
+                        st.markdown("**Top Risk Drivers (from model):**")
+                        for r in reason_list[:5]:
+                            feat = r.get("feature", "?")
+                            contrib = r.get("contribution", 0)
+                            direction = r.get("direction", "?")
+                            st.markdown(f"- `{feat}`: {contrib:+.4f} ({direction})")
+                except (json.JSONDecodeError, TypeError):
+                    pass
+    else:
+        st.info("Evidence package not available for this PO line.")
+except Exception as e:
+    st.warning(f"Evidence panel unavailable: {e}")
 
 st.markdown("---")
 st.caption("Decision support only — no ERP writes. All values from deterministic SQL engine.")

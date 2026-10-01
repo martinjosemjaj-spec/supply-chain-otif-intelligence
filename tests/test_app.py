@@ -7,6 +7,7 @@ Requires: OTIF_GUARDIAN_MODE=demo (no Snowflake connection needed)
 import os
 import sys
 import pytest
+import pandas as pd
 
 # Force demo mode for all tests
 os.environ["OTIF_GUARDIAN_MODE"] = "demo"
@@ -288,3 +289,171 @@ class TestUnavailableFields:
     def test_unavailable_msg(self):
         msg = unavailable_msg("EXPOSURE_SCORE")
         assert isinstance(msg, str) and len(msg) > 0
+
+
+# ── System Status Smoke Tests ─────────────────────────────────
+
+class TestSystemStatus:
+    def test_system_status_returns_dict(self):
+        from lib.data import get_system_status
+        status = get_system_status()
+        assert isinstance(status, dict)
+        required_keys = ["model_version", "model_health", "data_freshness", "agent_status"]
+        for key in required_keys:
+            assert key in status, f"Missing key: {key}"
+
+    def test_system_status_demo_values(self):
+        from lib.data import get_system_status
+        status = get_system_status()
+        assert "demo" in status["model_version"].lower()
+        assert status["model_health"] == "HEALTHY"
+        assert status["agent_status"] == "DEMO"
+
+    def test_model_version_v3_in_demo(self):
+        mv = get_model_version()
+        assert "V3" in mv.get("DEFAULT_VERSION_NAME", "")
+
+
+# ── Caching Smoke Tests ───────────────────────────────────────
+
+class TestCaching:
+    def test_cached_query_returns_dataframe_in_demo(self):
+        from lib.data import cached_query
+        result = cached_query("SELECT 1")
+        assert isinstance(result, pd.DataFrame)
+        assert result.empty  # demo mode returns empty
+
+
+# ── Evidence Package Smoke Tests ──────────────────────────────
+
+class TestEvidencePackage:
+    def test_evidence_returns_expected_columns(self):
+        from lib.data import get_evidence_package
+        df = get_evidence_package(30001)
+        assert not df.empty
+        for col in ["MODEL_VERSION", "FEATURE_SET_VERSION", "CALCULATION_TYPE"]:
+            assert col in df.columns, f"Missing column: {col}"
+
+    def test_evidence_recovery_returns_dataframe(self):
+        from lib.data import get_evidence_recovery
+        df = get_evidence_recovery(30001)
+        assert isinstance(df, pd.DataFrame)
+
+
+# ── Monitoring Smoke Tests ────────────────────────────────────
+
+class TestMonitoring:
+    def test_monitoring_overall_demo(self):
+        from lib.data import get_monitoring_overall
+        df = get_monitoring_overall()
+        assert not df.empty
+        assert "OVERALL_STATUS" in df.columns
+        assert df.iloc[0]["OVERALL_STATUS"] == "HEALTHY"
+
+    def test_monitoring_dashboard_demo(self):
+        from lib.data import get_monitoring_dashboard
+        df = get_monitoring_dashboard()
+        assert isinstance(df, pd.DataFrame)
+
+
+# ── Filter Consistency Smoke Tests ────────────────────────────
+
+class TestFilterConsistency:
+    def test_risk_kpis_accept_all_filter_params(self):
+        df = get_risk_kpi_metrics(plant_filter="PLT-MFG-01",
+                                   risk_bands=["CRITICAL"], min_revenue=1000)
+        assert isinstance(df, pd.DataFrame)
+
+    def test_revenue_by_plant_accepts_filters(self):
+        df = get_revenue_by_plant(plant_filter="All",
+                                   risk_bands=["CRITICAL", "HIGH"], min_revenue=0)
+        assert isinstance(df, pd.DataFrame)
+
+    def test_risk_command_center_empty_bands(self):
+        df = get_risk_command_center(risk_bands=[])
+        assert df.empty
+
+    def test_risk_command_center_with_all_filters(self):
+        df = get_risk_command_center(plant_filter="PLT-MFG-02",
+                                     risk_bands=["HIGH", "MEDIUM"],
+                                     min_revenue=500, limit=5)
+        assert len(df) <= 5
+
+
+# ── Empty State Smoke Tests ───────────────────────────────────
+
+class TestEmptyStates:
+    def test_functions_return_dataframes_not_none(self):
+        from lib.data import (get_risk_command_center, get_risk_kpi_metrics,
+                              get_revenue_by_plant, get_po_detail,
+                              get_po_reason_codes, get_po_recovery_options)
+        for fn in [get_risk_kpi_metrics, get_revenue_by_plant]:
+            result = fn()
+            assert isinstance(result, pd.DataFrame), f"{fn.__name__} returned {type(result)}"
+
+    def test_po_detail_returns_dataframe(self):
+        df = get_po_detail(99999)
+        assert isinstance(df, pd.DataFrame)
+
+    def test_agent_error_returns_tuple(self):
+        answer, trace, raw = run_agent_query("")
+        assert isinstance(answer, str)
+
+
+# ── Config Hardening Smoke Tests ──────────────────────────────
+
+class TestConfigHardening:
+    def test_new_objects_in_config(self):
+        new_keys = ["monitoring_overall", "monitoring_dashboard",
+                    "evidence_package", "evidence_recovery",
+                    "production_model", "otif_projection"]
+        for key in new_keys:
+            assert key in OBJECTS, f"Missing OBJECTS key: {key}"
+
+    def test_cache_ttl_constants(self):
+        from lib.config import QUERY_CACHE_TTL, SYSTEM_STATUS_CACHE_TTL
+        assert QUERY_CACHE_TTL > 0
+        assert SYSTEM_STATUS_CACHE_TTL >= QUERY_CACHE_TTL
+
+
+# ── Observability Smoke Tests ─────────────────────────────────
+
+class TestObservability:
+    def test_operational_summary_returns_4_domains(self):
+        from lib.data import get_operational_summary
+        df = get_operational_summary()
+        assert not df.empty
+        assert set(df["DOMAIN"]) == {"DATA", "ML", "AGENT", "APPLICATION"}
+
+    def test_operational_summary_has_required_columns(self):
+        from lib.data import get_operational_summary
+        df = get_operational_summary()
+        for col in ["DOMAIN", "TOTAL_CHECKS", "HEALTHY", "WARNINGS",
+                     "CRITICAL", "DOMAIN_STATUS", "LAST_CHECKED", "MODEL_VERSION"]:
+            assert col in df.columns, f"Missing column: {col}"
+
+    def test_operational_summary_status_values(self):
+        from lib.data import get_operational_summary
+        df = get_operational_summary()
+        valid = {"HEALTHY", "WARNING", "CRITICAL"}
+        for status in df["DOMAIN_STATUS"]:
+            assert status in valid, f"Invalid status: {status}"
+
+    def test_operational_summary_counts_consistent(self):
+        from lib.data import get_operational_summary
+        df = get_operational_summary()
+        for _, row in df.iterrows():
+            total = int(row["HEALTHY"]) + int(row["WARNINGS"]) + int(row["CRITICAL"])
+            assert total == int(row["TOTAL_CHECKS"]), \
+                f"{row['DOMAIN']}: {total} != {int(row['TOTAL_CHECKS'])}"
+
+    def test_operational_detail_returns_empty_in_demo(self):
+        from lib.data import get_operational_detail
+        df = get_operational_detail()
+        assert isinstance(df, pd.DataFrame)
+
+    def test_operational_detail_accepts_domain_filter(self):
+        from lib.data import get_operational_detail
+        df = get_operational_detail(domain="ML")
+        assert isinstance(df, pd.DataFrame)
+

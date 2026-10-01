@@ -48,3 +48,8 @@ desktop.ini
 dist/
 build/
 *.egg-info/
+
+# CI/CD
+test-results.xml
+*.p8
+/tmp/

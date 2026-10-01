@@ -31,6 +31,14 @@ OBJECTS = {
     "customer_orders": f"{DB}.RAW.CUSTOMER_ORDERS",
     "recovery_log": f"{DB}.ML.RECOVERY_ENGINE_LOG",
     "agent": f"{DB}.AGENTS.OTIF_GUARDIAN_AGENT",
+    "monitoring_overall": f"{DB}.AUDIT.V_MONITORING_OVERALL",
+    "monitoring_dashboard": f"{DB}.AUDIT.V_MONITORING_DASHBOARD",
+    "evidence_package": f"{DB}.ML.V_EVIDENCE_PACKAGE",
+    "evidence_recovery": f"{DB}.ML.V_EVIDENCE_RECOVERY",
+    "decision_layer": f"{DB}.ML.V_DECISION_LAYER_COMPLETE",
+    "otif_projection": f"{DB}.ML.V_OTIF_PROJECTION",
+    "production_model": f"{DB}.AUDIT.V_PRODUCTION_MODEL",
+    "decision_assumptions": f"{DB}.ML.DECISION_ASSUMPTIONS",
 }
 
 # ── Field Mapping Documentation ──────────────────────────────
@@ -80,6 +88,8 @@ DEFAULT_MIN_REVENUE = 0
 REVENUE_STEP = 10_000
 COMMAND_CENTER_PAGE_SIZE = 100
 CACHE_TTL_SECONDS = 120
+SYSTEM_STATUS_CACHE_TTL = 300  # 5 min for metadata (model version, health)
+QUERY_CACHE_TTL = 120          # 2 min for data queries
 
 # ── Unavailable Fields ───────────────────────────────────────
 # Per SKILL.md S2: "isolate the affected live feature with a clear

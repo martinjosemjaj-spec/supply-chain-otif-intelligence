@@ -12,7 +12,10 @@ try:
 except ImportError:
     _HAS_ST = False
 
-from lib.config import APP_MODE, OBJECTS, CACHE_TTL_SECONDS, UNAVAILABLE_FIELDS
+from lib.config import (
+    APP_MODE, OBJECTS, CACHE_TTL_SECONDS, UNAVAILABLE_FIELDS,
+    QUERY_CACHE_TTL, SYSTEM_STATUS_CACHE_TTL,
+)
 
 _DEMO_DIR = None
 
@@ -59,6 +62,19 @@ def run_query(sql: str):
         return pd.DataFrame()
     session = get_session()
     return session.sql(sql).to_pandas()
+
+
+def cached_query(sql: str, ttl: int = QUERY_CACHE_TTL):
+    """Cached query wrapper — avoids re-running identical SQL within TTL."""
+    if is_demo_mode():
+        return pd.DataFrame()
+    if _HAS_ST:
+        @st.cache_data(ttl=ttl, show_spinner=False)
+        def _run(sql_text):
+            session = get_session()
+            return session.sql(sql_text).to_pandas()
+        return _run(sql)
+    return run_query(sql)
 
 
 # ── Formatting Helpers ───────────────────────────────────────
@@ -122,14 +138,24 @@ def unavailable_msg(field_name):
 
 def get_model_version():
     if is_demo_mode():
-        return {"DEFAULT_VERSION_NAME": "V2-XGBoost (demo)"}
+        return {"DEFAULT_VERSION_NAME": "V3-XGBoost (demo)"}
+    try:
+        df = cached_query(f"""
+            SELECT VERSION_NAME, APPROVAL_STATUS, ROC_AUC, RECALL, F1_SCORE
+            FROM {OBJECTS['production_model']} LIMIT 1
+        """, ttl=SYSTEM_STATUS_CACHE_TTL)
+        if not df.empty:
+            row = df.iloc[0]
+            return {"DEFAULT_VERSION_NAME": row.get("VERSION_NAME", "N/A")}
+    except Exception:
+        pass
     try:
         df = run_query("SHOW MODELS LIKE 'OTIF_BREACH_PREDICTOR' IN SCHEMA OTIF_GUARDIAN.ML")
         if not df.empty:
             return df.iloc[0].to_dict()
     except Exception:
         pass
-    return {"DEFAULT_VERSION_NAME": "V2-XGBoost"}
+    return {"DEFAULT_VERSION_NAME": "V3-XGBoost"}
 
 
 def get_model_version_str():
@@ -141,14 +167,50 @@ def get_data_freshness():
     if is_demo_mode():
         return pd.DataFrame({"SOURCE_TABLE": ["PO_LINES", "INVENTORY", "CUSTOMER_ORDERS"],
                              "LAST_UPDATED": ["(demo)", "(demo)", "(demo)"]})
-    return run_query(f"""
+    return cached_query(f"""
         SELECT 'PO_LINES' AS source_table, MAX(created_at) AS last_updated
         FROM {OBJECTS['po_lines']}
         UNION ALL
         SELECT 'INVENTORY', MAX(created_at) FROM {OBJECTS['plants'].replace('PLANTS','INVENTORY')}
         UNION ALL
         SELECT 'CUSTOMER_ORDERS', MAX(created_at) FROM {OBJECTS['customer_orders']}
-    """)
+    """, ttl=SYSTEM_STATUS_CACHE_TTL)
+
+
+def get_system_status():
+    """Single cached call returning model version, health, freshness, agent status."""
+    if is_demo_mode():
+        return {
+            "model_version": "V3-XGBoost (demo)",
+            "model_health": "HEALTHY",
+            "data_freshness": "(demo)",
+            "agent_status": "DEMO",
+        }
+    status = {
+        "model_version": get_model_version_str(),
+        "model_health": "UNKNOWN",
+        "data_freshness": "Unknown",
+        "agent_status": "UNKNOWN",
+    }
+    try:
+        mon = get_monitoring_overall()
+        if not mon.empty:
+            status["model_health"] = mon.iloc[0].get("OVERALL_STATUS", "UNKNOWN")
+    except Exception:
+        pass
+    try:
+        fresh = get_data_freshness()
+        if not fresh.empty:
+            latest = fresh["LAST_UPDATED"].max()
+            status["data_freshness"] = str(latest)[:19] if latest else "Unknown"
+    except Exception:
+        pass
+    try:
+        cached_query(f"SELECT 1 FROM {OBJECTS['agent']} LIMIT 0", ttl=SYSTEM_STATUS_CACHE_TTL)
+        status["agent_status"] = "ACTIVE"
+    except Exception:
+        status["agent_status"] = "AVAILABLE"
+    return status
 
 
 def get_prediction_time():
@@ -340,7 +402,11 @@ def get_po_detail(po_line_id):
     if is_demo_mode():
         return _demo_po_detail(po_line_id)
     return run_query(f"""
-        SELECT r.*, p.PLANT_NAME
+        SELECT r.PO_LINE_ID, r.PO_NUMBER, r.SUPPLIER_NAME, r.MATERIAL_CODE,
+            r.PLANT_CODE, p.PLANT_NAME, r.RISK_TIER, r.BREACH_PROBABILITY,
+            r.DAYS_UNTIL_DUE, r.QUANTITY_ORDERED, r.LINE_VALUE,
+            r.PROMISED_DELIVERY_DATE, r.SUPPLIER_TIER, r.MATERIAL_CATEGORY,
+            r.ABC_CLASS, r.CRITICALITY
         FROM {OBJECTS['risk_lines']} r
         LEFT JOIN {OBJECTS['plants']} p ON r.PLANT_CODE = p.PLANT_CODE
         WHERE r.PO_LINE_ID = {int(po_line_id)}
@@ -406,15 +472,23 @@ def get_at_risk_lines(risk_tier="CRITICAL", limit=50):
 
 
 def get_risk_by_supplier():
-    return run_query(f"SELECT * FROM {OBJECTS['risk_by_supplier']} ORDER BY high_risk_lines DESC LIMIT 20")
+    return cached_query(f"""
+        SELECT SUPPLIER_NAME, SUPPLIER_TIER, HIGH_RISK_LINES, TOTAL_LINES,
+            AVG_BREACH_PROBABILITY, TOTAL_LINE_VALUE
+        FROM {OBJECTS['risk_by_supplier']} ORDER BY HIGH_RISK_LINES DESC LIMIT 20
+    """)
 
 
 def get_risk_by_material():
-    return run_query(f"SELECT * FROM {OBJECTS['risk_by_material']} ORDER BY high_risk_lines DESC LIMIT 20")
+    return cached_query(f"""
+        SELECT MATERIAL_CODE, MATERIAL_CATEGORY, HIGH_RISK_LINES, TOTAL_LINES,
+            AVG_BREACH_PROBABILITY, TOTAL_LINE_VALUE
+        FROM {OBJECTS['risk_by_material']} ORDER BY HIGH_RISK_LINES DESC LIMIT 20
+    """)
 
 
 def get_feature_importance():
-    return run_query(f"SELECT * FROM {OBJECTS['feature_importance']} ORDER BY SCORE DESC LIMIT 15")
+    return cached_query(f"SELECT FEATURE, SCORE FROM {OBJECTS['feature_importance']} ORDER BY SCORE DESC LIMIT 15")
 
 
 def get_reason_codes_for_line(po_line_id):
@@ -427,11 +501,20 @@ def get_reason_codes_for_line(po_line_id):
 
 
 def get_recovery_portfolio():
-    return run_query(f"SELECT * FROM {OBJECTS['recovery_portfolio']}")
+    return cached_query(f"""
+        SELECT AT_RISK_LINES_ADDRESSABLE, TOTAL_REVENUE_PROTECTED, TOTAL_INCREMENTAL_COST,
+            TOTAL_NET_VALUE_PROTECTED, PORTFOLIO_ROI_MULTIPLE,
+            RECOMMENDED_EXPEDITES, RECOMMENDED_TRANSFERS, RECOMMENDED_ALT_SUPPLIERS
+        FROM {OBJECTS['recovery_portfolio']}
+    """)
 
 
 def get_recovery_by_action_type():
-    return run_query(f"SELECT * FROM {OBJECTS['recovery_by_action']}")
+    return cached_query(f"""
+        SELECT ACTION_TYPE, LINE_COUNT, TOTAL_REVENUE_PROTECTED, TOTAL_INCREMENTAL_COST,
+            TOTAL_NET_VALUE_PROTECTED, AVG_SUCCESS_PROBABILITY
+        FROM {OBJECTS['recovery_by_action']}
+    """)
 
 
 def get_best_recovery_actions(limit=50):
@@ -459,14 +542,110 @@ def get_recovery_for_po(po_line_id):
 
 
 def get_model_metrics():
-    return run_query(f"SELECT * FROM {OBJECTS['model_metrics']}")
+    return cached_query(f"""
+        SELECT ROC_AUC, ACCURACY, PRECISION_BREACH, RECALL_BREACH, F1_BREACH
+        FROM {OBJECTS['model_metrics']}
+    """)
 
 
 def get_confusion_matrix():
-    return run_query(f"SELECT * FROM {OBJECTS['confusion_matrix']}")
+    return cached_query(f"""
+        SELECT ACTUAL_LABEL, PREDICTED_LABEL, COUNT
+        FROM {OBJECTS['confusion_matrix']}
+    """)
 
 
 # ── Agent / Copilot ──────────────────────────────────────────
+
+
+def get_evidence_package(po_line_id):
+    if is_demo_mode():
+        return pd.DataFrame({
+            "PO_LINE_ID": [po_line_id], "MODEL_VERSION": ["V3 (demo)"],
+            "FEATURE_SET_VERSION": ["V2 (demo)"],
+            "DATA_FRESHNESS_TIMESTAMP": ["(demo)"],
+            "SOURCE_GOVERNED_VIEWS": ["V_EVIDENCE_PACKAGE"],
+            "CALCULATION_TYPE": ["DETERMINISTIC"],
+        })
+    return run_query(f"""
+        SELECT PO_LINE_ID, MODEL_VERSION, FEATURE_SET_VERSION,
+            DATA_FRESHNESS_TIMESTAMP, SOURCE_GOVERNED_VIEWS,
+            CALCULATION_TYPE, SCORED_WITH_VERSION, TOP_REASONS,
+            RISK_TIER, BREACH_PROBABILITY, LINE_VALUE
+        FROM {OBJECTS['evidence_package']}
+        WHERE PO_LINE_ID = {int(po_line_id)}
+    """)
+
+
+def get_evidence_recovery(po_line_id):
+    if is_demo_mode():
+        return _demo_recovery_options(po_line_id)
+    return run_query(f"""
+        SELECT PO_LINE_ID, ACTION_TYPE, ACTION_RANK, BASELINE_EXPOSURE,
+            PROJECTED_EXPOSURE, RECOVERY_COST, NET_VALUE, IS_FEASIBLE
+        FROM {OBJECTS['evidence_recovery']}
+        WHERE PO_LINE_ID = {int(po_line_id)}
+        ORDER BY ACTION_RANK
+    """)
+
+
+def get_monitoring_overall():
+    if is_demo_mode():
+        return pd.DataFrame({
+            "OVERALL_STATUS": ["HEALTHY"], "TOTAL_CHECKS": [90],
+            "HEALTHY": [84], "WARNINGS": [0], "CRITICAL": [6],
+        })
+    return cached_query(f"""
+        SELECT OVERALL_STATUS, TOTAL_CHECKS, HEALTHY, WARNINGS, CRITICAL
+        FROM {OBJECTS['monitoring_overall']}
+    """, ttl=SYSTEM_STATUS_CACHE_TTL)
+
+
+def get_monitoring_dashboard():
+    if is_demo_mode():
+        return pd.DataFrame()
+    return cached_query(f"""
+        SELECT CATEGORY, STATUS, TOTAL_CHECKS, PASSED, WARNINGS, CRITICAL
+        FROM {OBJECTS['monitoring_dashboard']}
+    """)
+
+
+def get_operational_summary():
+    """Domain-level operational health: DATA, ML, AGENT, APPLICATION."""
+    if is_demo_mode():
+        return pd.DataFrame({
+            "DOMAIN": ["DATA", "ML", "AGENT", "APPLICATION"],
+            "TOTAL_CHECKS": [33, 10, 2, 2],
+            "HEALTHY": [32, 4, 1, 2],
+            "WARNINGS": [1, 0, 1, 0],
+            "CRITICAL": [0, 6, 0, 0],
+            "DOMAIN_STATUS": ["WARNING", "CRITICAL", "WARNING", "HEALTHY"],
+            "LAST_CHECKED": ["(demo)", "(demo)", "(demo)", "(demo)"],
+            "MODEL_VERSION": ["V3", "V3", "1.1-hardened", "V3"],
+        })
+    return cached_query("""
+        SELECT DOMAIN, TOTAL_CHECKS, HEALTHY, WARNINGS, CRITICAL,
+            DOMAIN_STATUS, LAST_CHECKED, MODEL_VERSION
+        FROM OTIF_GUARDIAN.AUDIT.V_OPERATIONAL_SUMMARY
+    """, ttl=SYSTEM_STATUS_CACHE_TTL)
+
+
+def get_operational_detail(domain=None):
+    """Row-level operational health checks. Optional domain filter."""
+    if is_demo_mode():
+        return pd.DataFrame()
+    where = f"WHERE DOMAIN = '{domain}'" if domain else ""
+    return cached_query(f"""
+        SELECT DOMAIN, SUBDOMAIN, STATUS, METRIC_VALUE, METRIC_LABEL,
+            CHECKED_AT, MODEL_VERSION, DETAIL
+        FROM OTIF_GUARDIAN.AUDIT.V_OPERATIONAL_HEALTH
+        {where}
+        ORDER BY DOMAIN, SUBDOMAIN, STATUS DESC
+    """)
+
+
+# ── Agent / Copilot ──────────────────────────────────────────
+
 
 def run_agent_query(question):
     """Call the Cortex Agent. Returns (answer_text, trace_json, raw_response)."""

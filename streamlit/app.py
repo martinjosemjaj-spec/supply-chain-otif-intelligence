@@ -8,7 +8,7 @@ import streamlit as st
 import sys, os
 
 sys.path.insert(0, os.path.dirname(__file__))
-from lib.data import is_demo_mode, get_plants
+from lib.data import is_demo_mode, get_plants, get_system_status
 from lib.config import (
     RISK_BANDS, DEFAULT_RISK_BANDS, DEFAULT_MIN_REVENUE,
     REVENUE_STEP, PLANNING_HORIZON_DAYS,
@@ -49,6 +49,25 @@ st.markdown(
 
 if is_demo_mode():
     st.warning("🔶 DEMO MODE — Running with synthetic data. Not connected to Snowflake.")
+
+# ── System Status Bar ────────────────────────────────────────
+try:
+    _status = get_system_status()
+    _health_color = {"HEALTHY": "#36B37E", "WARNING": "#FFAB00", "CRITICAL": "#DE350B"}.get(
+        _status["model_health"], "#888")
+    st.markdown(
+        f'<div style="display:flex; gap:1.5rem; padding:0.4rem 1rem; '
+        f'background:#f8fafc; border-radius:6px; margin-bottom:0.5rem; font-size:0.82rem;">'
+        f'<span><b>Data Freshness:</b> {_status["data_freshness"]}</span>'
+        f'<span><b>Model:</b> {_status["model_version"]}</span>'
+        f'<span><b>Health:</b> <span style="color:{_health_color}; font-weight:600;">'
+        f'{_status["model_health"]}</span></span>'
+        f'<span><b>Agent:</b> {_status["agent_status"]}</span>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+except Exception:
+    pass
 
 # ── Sidebar: Scope & Filters (SKILL.md S5) ──────────────────
 st.sidebar.markdown(
@@ -122,7 +141,7 @@ st.sidebar.caption(
     "ML predictions use XGBoost with SHAP explainability. "
     "No ERP writes."
 )
-st.sidebar.caption(f"v2.0 | {'Demo' if is_demo_mode() else 'Live'} mode")
+st.sidebar.caption(f"v3.0 | {'Demo' if is_demo_mode() else 'Live'} mode")
 
 # ── Page Router ──────────────────────────────────────────────
 if "Risk Command Center" in page:

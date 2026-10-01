@@ -1,0 +1,96 @@
+# OTIF Guardian - Continuous Integration
+# Runs on every push and pull request: lint, unit tests, YAML validation.
+# No Snowflake connection needed — all tests run in demo mode.
+
+name: CI
+
+on:
+  push:
+    branches: [master, dev, "feature/**"]
+  pull_request:
+    branches: [master]
+
+jobs:
+  lint:
+    name: Lint & Syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install flake8 pyyaml
+
+      - name: Flake8 lint (Python)
+        run: |
+          flake8 streamlit/ tests/ scripts/ \
+            --max-line-length=120 \
+            --extend-ignore=E501,W503 \
+            --exclude=__pycache__
+
+      - name: Validate YAML files
+        run: |
+          python -c "
+          import yaml, sys
+          files = ['config/environments.yml']
+          for f in files:
+              try:
+                  yaml.safe_load(open(f))
+                  print(f'  OK: {f}')
+              except Exception as e:
+                  print(f'  FAIL: {f} — {e}')
+                  sys.exit(1)
+          "
+
+      - name: Validate agent YAML
+        run: |
+          python -c "
+          import yaml
+          with open('agent/otif_guardian_agent.agent.yaml') as f:
+              doc = yaml.safe_load(f)
+          assert 'tools' in doc, 'Agent YAML missing tools section'
+          print(f'  Agent YAML OK: {len(doc.get(\"tools\", []))} tools defined')
+          "
+
+      - name: Validate semantic view YAML
+        run: |
+          python -c "
+          import yaml
+          with open('semantic/otif_guardian_supply_chain.sv.yaml') as f:
+              doc = yaml.safe_load(f)
+          assert 'tables' in doc or 'name' in doc, 'Semantic YAML missing required fields'
+          print('  Semantic view YAML OK')
+          "
+
+  test:
+    name: Python Unit Tests
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install pytest streamlit pandas snowflake-snowpark-python
+
+      - name: Run pytest (demo mode)
+        env:
+          OTIF_GUARDIAN_MODE: demo
+        run: |
+          python -m pytest tests/test_app.py -v --tb=short --junitxml=test-results.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: test-results.xml

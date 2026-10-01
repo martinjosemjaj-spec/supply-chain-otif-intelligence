@@ -29,7 +29,8 @@ if not bands:
 
 # ── KPI Cards ────────────────────────────────────────────────
 try:
-    kpis = get_risk_kpi_metrics(plant, bands, min_rev)
+    with st.spinner("Loading risk metrics..."):
+        kpis = get_risk_kpi_metrics(plant, bands, min_rev)
     if not kpis.empty:
         row = kpis.iloc[0]
         c1, c2, c3, c4 = st.columns(4)

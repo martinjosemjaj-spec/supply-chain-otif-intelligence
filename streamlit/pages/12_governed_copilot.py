@@ -43,16 +43,28 @@ suggestions = [
     "Which inbound orders threaten customer OTIF?"
     + (f" at {plant}" if plant != "All" else ""),
     "Which suppliers have the most revenue at risk?",
+    "What is the current inbound OTIF rate?",
+    "Show me the top 5 high-risk PO lines by breach probability.",
+    "Which materials have the highest breach rate?",
+    "How many open PO lines are there and what is the total value at risk?",
+    "What recovery actions are recommended for critical risk lines?",
+    "Which plants have the most revenue exposure?",
 ]
 if selected_po:
     suggestions.insert(1, f"Why is PO line {selected_po} high risk?")
     suggestions.append(f"What is the best feasible recovery action for PO line {selected_po}?")
 
-cols = st.columns(min(len(suggestions), 4))
+row1 = st.columns(min(len(suggestions), 4))
 clicked_suggestion = None
 for i, s in enumerate(suggestions[:4]):
-    with cols[i]:
+    with row1[i]:
         if st.button(s, key=f"suggest_{i}", use_container_width=True):
+            clicked_suggestion = s
+
+row2 = st.columns(min(len(suggestions) - 4, 4)) if len(suggestions) > 4 else []
+for i, s in enumerate(suggestions[4:8]):
+    with row2[i]:
+        if st.button(s, key=f"suggest_{i+4}", use_container_width=True):
             clicked_suggestion = s
 
 st.markdown("---")

@@ -114,7 +114,7 @@ with tab3:
     try:
         fi = get_feature_importance()
         if not fi.empty:
-            st.bar_chart(fi.set_index("FEATURE")["SCORE"], use_container_width=True)
+            st.bar_chart(fi.set_index("FEATURE_NAME")["IMPORTANCE_SCORE"], use_container_width=True)
             st.dataframe(fi, use_container_width=True)
         else:
             st.info("No feature importance data.")

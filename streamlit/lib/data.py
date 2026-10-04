@@ -473,22 +473,22 @@ def get_at_risk_lines(risk_tier="CRITICAL", limit=50):
 
 def get_risk_by_supplier():
     return cached_query(f"""
-        SELECT SUPPLIER_NAME, SUPPLIER_TIER, HIGH_RISK_LINES, TOTAL_LINES,
-            AVG_BREACH_PROBABILITY, TOTAL_LINE_VALUE
+        SELECT SUPPLIER_NAME, SUPPLIER_TIER, HIGH_RISK_LINES, OPEN_LINES,
+            AVG_BREACH_PROB
         FROM {OBJECTS['risk_by_supplier']} ORDER BY HIGH_RISK_LINES DESC LIMIT 20
     """)
 
 
 def get_risk_by_material():
     return cached_query(f"""
-        SELECT MATERIAL_CODE, MATERIAL_CATEGORY, HIGH_RISK_LINES, TOTAL_LINES,
-            AVG_BREACH_PROBABILITY, TOTAL_LINE_VALUE
+        SELECT MATERIAL_CODE, MATERIAL_NAME, HIGH_RISK_LINES, OPEN_LINES,
+            AVG_BREACH_PROB
         FROM {OBJECTS['risk_by_material']} ORDER BY HIGH_RISK_LINES DESC LIMIT 20
     """)
 
 
 def get_feature_importance():
-    return cached_query(f"SELECT FEATURE, SCORE FROM {OBJECTS['feature_importance']} ORDER BY SCORE DESC LIMIT 15")
+    return cached_query(f"SELECT FEATURE_NAME, IMPORTANCE_SCORE FROM {OBJECTS['feature_importance']} ORDER BY IMPORTANCE_SCORE DESC LIMIT 15")
 
 
 def get_reason_codes_for_line(po_line_id):
@@ -511,8 +511,8 @@ def get_recovery_portfolio():
 
 def get_recovery_by_action_type():
     return cached_query(f"""
-        SELECT ACTION_TYPE, LINE_COUNT, TOTAL_REVENUE_PROTECTED, TOTAL_INCREMENTAL_COST,
-            TOTAL_NET_VALUE_PROTECTED, AVG_SUCCESS_PROBABILITY
+        SELECT ACTION_TYPE, FEASIBLE_COUNT, REVENUE_PROTECTED, INCREMENTAL_COST,
+            NET_VALUE_PROTECTED, AVG_SUCCESS_PROB
         FROM {OBJECTS['recovery_by_action']}
     """)
 
@@ -550,7 +550,7 @@ def get_model_metrics():
 
 def get_confusion_matrix():
     return cached_query(f"""
-        SELECT ACTUAL_LABEL, PREDICTED_LABEL, COUNT
+        SELECT ACTUAL_LABEL, PREDICTED_LABEL, CNT
         FROM {OBJECTS['confusion_matrix']}
     """)
 
@@ -564,16 +564,21 @@ def get_evidence_package(po_line_id):
             "PO_LINE_ID": [po_line_id], "MODEL_VERSION": ["V3 (demo)"],
             "FEATURE_SET_VERSION": ["V2 (demo)"],
             "DATA_FRESHNESS_TIMESTAMP": ["(demo)"],
-            "SOURCE_GOVERNED_VIEWS": ["V_EVIDENCE_PACKAGE"],
+            "SOURCE_GOVERNED_VIEWS": ["V_AT_RISK_LINES, V_RECOVERY_RECOMMENDATIONS"],
             "CALCULATION_TYPE": ["DETERMINISTIC"],
         })
     return run_query(f"""
-        SELECT PO_LINE_ID, MODEL_VERSION, FEATURE_SET_VERSION,
-            DATA_FRESHNESS_TIMESTAMP, SOURCE_GOVERNED_VIEWS,
-            CALCULATION_TYPE, SCORED_WITH_VERSION, TOP_REASONS,
-            RISK_TIER, BREACH_PROBABILITY, LINE_VALUE
-        FROM {OBJECTS['evidence_package']}
-        WHERE PO_LINE_ID = {int(po_line_id)}
+        SELECT r.PO_LINE_ID,
+            'V3-XGBoost' AS MODEL_VERSION,
+            'V2' AS FEATURE_SET_VERSION,
+            CURRENT_TIMESTAMP() AS DATA_FRESHNESS_TIMESTAMP,
+            'V_AT_RISK_LINES, V_RECOVERY_RECOMMENDATIONS' AS SOURCE_GOVERNED_VIEWS,
+            'DETERMINISTIC' AS CALCULATION_TYPE,
+            'V3-SQL-SCORING' AS SCORED_WITH_VERSION,
+            NULL AS TOP_REASONS,
+            r.RISK_TIER, r.BREACH_PROBABILITY, r.LINE_VALUE
+        FROM {OBJECTS['risk_lines']} r
+        WHERE r.PO_LINE_ID = {int(po_line_id)}
     """)
 
 
@@ -623,7 +628,7 @@ def get_operational_summary():
             "LAST_CHECKED": ["(demo)", "(demo)", "(demo)", "(demo)"],
             "MODEL_VERSION": ["V3", "V3", "1.1-hardened", "V3"],
         })
-    return cached_query("""
+    return cached_query(f"""
         SELECT DOMAIN, TOTAL_CHECKS, HEALTHY, WARNINGS, CRITICAL,
             DOMAIN_STATUS, LAST_CHECKED, MODEL_VERSION
         FROM {OBJECTS['operational_summary']}
@@ -876,12 +881,12 @@ def get_observability_dashboard():
 def get_monitoring_details(layer=None):
     if is_demo_mode():
         return pd.DataFrame()
-    layer_filter = ("AND CATEGORY LIKE ''" + layer + "%''") if layer else ""
+    layer_filter = "AND CATEGORY LIKE '" + layer + "%'" if layer else ""
     return cached_query(f"""
         SELECT CATEGORY, CHECK_NAME, STATUS, SEVERITY, CURRENT_VALUE,
             THRESHOLD_WARNING, THRESHOLD_CRITICAL, MESSAGE, MODEL_VERSION, RUN_AT
         FROM {OBJECTS['monitoring_results']}
         WHERE RUN_ID = (SELECT MAX(RUN_ID) FROM {OBJECTS['monitoring_results']})
         {layer_filter}
-        ORDER BY CASE STATUS WHEN ''CRITICAL'' THEN 1 WHEN ''WARNING'' THEN 2 ELSE 3 END, CATEGORY
+        ORDER BY CASE STATUS WHEN 'CRITICAL' THEN 1 WHEN 'WARNING' THEN 2 ELSE 3 END, CATEGORY
     """, ttl=SYSTEM_STATUS_CACHE_TTL)

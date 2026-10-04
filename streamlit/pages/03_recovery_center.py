@@ -9,7 +9,9 @@ sys.path.insert(0, "..")
 from lib.data import (
     get_recovery_portfolio, get_recovery_by_action_type,
     get_best_recovery_actions, get_recovery_for_po,
-    get_prediction_time, get_model_version, fmt_dollar, fmt_number
+    get_prediction_time, get_model_version, fmt_dollar, fmt_number,
+    get_executive_kpis, get_recovery_impact_summary,
+    get_decision_assumptions, get_model_version_str,
 )
 
 # ── Page Header ──────────────────────────────────────────────
@@ -66,6 +68,52 @@ try:
         st.info("No recovery data. Run the recovery engine first.")
 except Exception as e:
     st.error(f"Failed to load portfolio: {e}")
+
+# ── Before / After OTIF Projection ──────────────────────────
+st.markdown("#### Projected Impact: Before vs After Recovery")
+
+try:
+    kpis = get_executive_kpis()
+    rec = get_recovery_impact_summary()
+    if not kpis.empty and rec["addressable"] > 0:
+        current_otif = float(kpis.iloc[0]["INBOUND_OTIF_RATE"])
+        otif_lift = rec["otif_lift"]
+
+        b1, b2, b3 = st.columns(3)
+        with b1:
+            st.markdown(
+                f'<div style="text-align:center; padding:0.8rem; border:2px solid #FF5630; border-radius:8px;">'
+                f'<div style="font-size:0.8rem; color:#666;">CURRENT STATE</div>'
+                f'<div style="font-size:1.5rem; font-weight:700; color:#FF5630;">{current_otif:.1f}%</div>'
+                f'<div style="font-size:0.75rem; color:#888;">Inbound OTIF Rate</div>'
+                f'</div>', unsafe_allow_html=True)
+        with b2:
+            st.markdown(
+                f'<div style="text-align:center; padding:0.8rem;">'
+                f'<div style="font-size:2rem; color:#666;">→</div>'
+                f'<div style="font-size:0.85rem; font-weight:600; color:#36B37E;">+{otif_lift:.1f} pp lift</div>'
+                f'<div style="font-size:0.75rem; color:#888;">{rec["feasible_actions"]} actions</div>'
+                f'</div>', unsafe_allow_html=True)
+        with b3:
+            projected = min(current_otif + otif_lift, 100)
+            st.markdown(
+                f'<div style="text-align:center; padding:0.8rem; border:2px solid #36B37E; border-radius:8px;">'
+                f'<div style="font-size:0.8rem; color:#666;">PROJECTED STATE</div>'
+                f'<div style="font-size:1.5rem; font-weight:700; color:#36B37E;">{projected:.1f}%</div>'
+                f'<div style="font-size:0.75rem; color:#888;">After all feasible actions</div>'
+                f'</div>', unsafe_allow_html=True)
+
+        st.markdown(
+            f'<div style="background:#f0f8f0; padding:0.4rem 0.8rem; border-radius:4px; '
+            f'font-size:0.78rem; color:#555; margin-top:0.5rem;">'
+            f'Revenue protected: <b>{fmt_dollar(rec["revenue_protected"])}</b> &nbsp;|&nbsp; '
+            f'Net value created: <b>{fmt_dollar(rec["net_value"])}</b> &nbsp;|&nbsp; '
+            f'Portfolio ROI: <b>{abs(rec["portfolio_roi"]):.1f}x</b> &nbsp;|&nbsp; '
+            f'Model: <b>{get_model_version_str()}</b> &nbsp;|&nbsp; '
+            f'Timestamp: <b>{get_prediction_time()}</b>'
+            f'</div>', unsafe_allow_html=True)
+except Exception as e:
+    st.warning(f"Before/after projection unavailable: {e}")
 
 st.markdown("---")
 
@@ -150,3 +198,18 @@ if sim_btn:
             st.warning("No feasible recovery actions for this PO line.")
     except Exception as e:
         st.error(f"{e}")
+
+st.markdown("---")
+
+# ── Decision Assumptions ────────────────────────────────────
+with st.expander("Decision Assumptions (configurable)", expanded=False):
+    st.caption("These parameters govern all recovery cost, success probability, and OTIF lift calculations. "
+               "They are stored in OTIF_GUARDIAN.ML.DECISION_ASSUMPTIONS and can be updated without code changes.")
+    try:
+        assumptions = get_decision_assumptions()
+        if not assumptions.empty:
+            st.dataframe(assumptions, use_container_width=True, hide_index=True)
+        else:
+            st.info("No decision assumptions configured.")
+    except Exception as e:
+        st.warning(f"Unable to load assumptions: {e}")

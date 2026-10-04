@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from lib.data import (
     get_risk_command_center, get_risk_kpi_metrics, get_revenue_by_plant,
     fmt_dollar, fmt_prob, fmt_number, fmt_days, is_demo_mode, unavailable_msg,
+    get_model_version_str, get_dq_gate_status,
 )
 from lib.config import COMMAND_CENTER_PAGE_SIZE
 
@@ -123,3 +124,20 @@ with st.expander("Unavailable prototype fields", expanded=False):
     for field in ["EXPOSURE_SCORE", "PROJECTED_CUSTOMER_OTIF_PCT",
                   "SUPPLIER_OTIF_90D", "INVENTORY_DOS"]:
         st.markdown(f"- **{field}**: {unavailable_msg(field)}")
+
+# ── Trust Metadata ──────────────────────────────────────────
+try:
+    dq = get_dq_gate_status()
+    gate = dq.get("gate_status", "UNKNOWN")
+    gate_color = {"PASS": "#36B37E", "BLOCKED": "#DE350B"}.get(gate, "#FFAB00")
+    mv_str = get_model_version_str()
+    st.markdown(
+        f'<div style="background:#f8f8f8; padding:0.4rem 1rem; border-radius:4px; '
+        f'font-size:0.75rem; color:#888; margin-top:0.5rem;">'
+        f'Model: <b>{mv_str}</b> &nbsp;|&nbsp; '
+        f'DQ Gate: <b style="color:{gate_color}">{gate}</b> &nbsp;|&nbsp; '
+        f'Source: Governed ML views (V_AT_RISK_LINES) &nbsp;|&nbsp; '
+        f'Filters: Plant={plant}, Bands={",".join(bands)}, Min Rev=${min_rev:,.0f}'
+        f'</div>', unsafe_allow_html=True)
+except Exception:
+    pass

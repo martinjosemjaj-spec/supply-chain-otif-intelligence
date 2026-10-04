@@ -39,6 +39,17 @@ OBJECTS = {
     "otif_projection": f"{DB}.ML.V_OTIF_PROJECTION",
     "production_model": f"{DB}.AUDIT.V_PRODUCTION_MODEL",
     "decision_assumptions": f"{DB}.ML.DECISION_ASSUMPTIONS",
+    "purchase_orders": f"{DB}.RAW.PURCHASE_ORDERS",
+    "suppliers": f"{DB}.RAW.SUPPLIERS",
+    "inventory": f"{DB}.RAW.INVENTORY",
+    "operational_summary": f"{DB}.AUDIT.V_OPERATIONAL_SUMMARY",
+    "operational_health": f"{DB}.AUDIT.V_OPERATIONAL_HEALTH",
+    "dq_latest_run": f"{DB}.AUDIT.V_DQ_LATEST_RUN",
+    "dq_failures": f"{DB}.AUDIT.V_DQ_FAILURES",
+    "dq_category_summary": f"{DB}.AUDIT.V_DQ_CATEGORY_SUMMARY",
+    "dq_run_summary": f"{DB}.AUDIT.DQ_RUN_SUMMARY",
+    "observability_dashboard": f"{DB}.AUDIT.V_OBSERVABILITY_DASHBOARD",
+    "monitoring_results": f"{DB}.AUDIT.MONITORING_RESULTS",
 }
 
 # ── Field Mapping Documentation ──────────────────────────────

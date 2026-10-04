@@ -9,7 +9,9 @@ sys.path.insert(0, "..")
 from lib.data import (
     get_executive_kpis, get_customer_otif_kpis, get_monthly_otif_trend,
     get_otif_by_supplier_tier, get_model_version, get_prediction_time,
-    get_data_freshness, fmt_dollar, fmt_pct, fmt_number
+    get_data_freshness, fmt_dollar, fmt_pct, fmt_number,
+    get_risk_tier_distribution, get_recovery_impact_summary,
+    get_dq_gate_status, get_model_version_str,
 )
 
 # ── Page Header ──────────────────────────────────────────────
@@ -88,6 +90,71 @@ try:
         st.info("No customer KPI data available.")
 except Exception as e:
     st.error(f"Failed to load customer KPIs: {e}")
+
+st.markdown("---")
+
+# ── Risk Tier Distribution (What is at risk?) ───────────────
+st.markdown("### Risk Exposure by Tier")
+
+try:
+    tiers = get_risk_tier_distribution()
+    if not tiers.empty:
+        tier_cols = st.columns(len(tiers))
+        tier_colors = {"CRITICAL": "#DE350B", "HIGH": "#FF5630", "MEDIUM": "#FFAB00", "LOW": "#36B37E"}
+        for i, (_, row) in enumerate(tiers.iterrows()):
+            tier = row["RISK_TIER"]
+            color = tier_colors.get(tier, "#888")
+            with tier_cols[i]:
+                st.markdown(
+                    f'<div style="border-left:4px solid {color}; padding:0.5rem 0.8rem; '
+                    f'background:{color}10; border-radius:4px;">'
+                    f'<div style="font-size:0.8rem; color:#666;">{tier}</div>'
+                    f'<div style="font-size:1.2rem; font-weight:700;">{int(row["LINE_COUNT"])} lines</div>'
+                    f'<div style="font-size:0.85rem; color:#444;">{fmt_dollar(row["TOTAL_VALUE"])} exposed</div>'
+                    f'</div>', unsafe_allow_html=True)
+    else:
+        st.info("No risk tier data available.")
+except Exception as e:
+    st.warning(f"Risk tier data unavailable: {e}")
+
+st.markdown("")
+
+# ── Recovery Impact Summary (What to do? What happens?) ─────
+st.markdown("### Recovery Impact")
+st.caption("Projected impact if all feasible recovery actions are executed")
+
+try:
+    rec = get_recovery_impact_summary()
+    r1, r2, r3, r4 = st.columns(4)
+    with r1:
+        st.metric("Addressable Lines", fmt_number(rec["addressable"]))
+    with r2:
+        st.metric("Revenue Protected", fmt_dollar(rec["revenue_protected"]))
+    with r3:
+        st.metric("Net Value Created", fmt_dollar(rec["net_value"]))
+    with r4:
+        st.metric("OTIF Lift (pp)", f"+{rec['otif_lift']:.1f}")
+except Exception as e:
+    st.warning(f"Recovery impact unavailable: {e}")
+
+st.markdown("---")
+
+# ── Trust Badge ─────────────────────────────────────────────
+try:
+    dq = get_dq_gate_status()
+    gate = dq.get("gate_status", "UNKNOWN")
+    gate_color = {"PASS": "#36B37E", "BLOCKED": "#DE350B"}.get(gate, "#FFAB00")
+    mv_str = get_model_version_str()
+    st.markdown(
+        f'<div style="background:#f5f5f5; padding:0.5rem 1rem; border-radius:6px; '
+        f'font-size:0.78rem; color:#666; display:flex; gap:2rem; align-items:center;">'
+        f'<span>Model: <b>{mv_str}</b></span>'
+        f'<span>DQ Gate: <b style="color:{gate_color}">{gate}</b> ({dq.get("passed",0)}/{dq.get("total_checks",0)})</span>'
+        f'<span>Decision: <b>Deterministic SQL</b></span>'
+        f'<span>Source: <b>Governed Semantic View</b></span>'
+        f'</div>', unsafe_allow_html=True)
+except Exception:
+    pass
 
 st.markdown("---")
 

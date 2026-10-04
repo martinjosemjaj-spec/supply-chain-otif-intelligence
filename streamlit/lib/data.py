@@ -171,7 +171,7 @@ def get_data_freshness():
         SELECT 'PO_LINES' AS source_table, MAX(created_at) AS last_updated
         FROM {OBJECTS['po_lines']}
         UNION ALL
-        SELECT 'INVENTORY', MAX(created_at) FROM {OBJECTS['plants'].replace('PLANTS','INVENTORY')}
+        SELECT 'INVENTORY', MAX(created_at) FROM {OBJECTS['inventory']}
         UNION ALL
         SELECT 'CUSTOMER_ORDERS', MAX(created_at) FROM {OBJECTS['customer_orders']}
     """, ttl=SYSTEM_STATUS_CACHE_TTL)
@@ -306,8 +306,8 @@ def get_otif_by_supplier_tier():
                 AND pl.QUANTITY_RECEIVED >= pl.QUANTITY_ORDERED
             ) * 100.0 / NULLIF(COUNT(*), 0), 1) AS otif_rate
         FROM {OBJECTS['po_lines']} pl
-        JOIN OTIF_GUARDIAN.RAW.PURCHASE_ORDERS po ON pl.PO_ID = po.PO_ID
-        JOIN OTIF_GUARDIAN.RAW.SUPPLIERS s ON po.SUPPLIER_ID = s.SUPPLIER_ID
+        JOIN {OBJECTS['purchase_orders']} po ON pl.PO_ID = po.PO_ID
+        JOIN {OBJECTS['suppliers']} s ON po.SUPPLIER_ID = s.SUPPLIER_ID
         WHERE pl.ACTUAL_DELIVERY_DATE IS NOT NULL
             AND pl.LINE_STATUS IN ('CLOSED','SHORT_CLOSED')
         GROUP BY s.SUPPLIER_TIER ORDER BY s.SUPPLIER_TIER
@@ -626,7 +626,7 @@ def get_operational_summary():
     return cached_query("""
         SELECT DOMAIN, TOTAL_CHECKS, HEALTHY, WARNINGS, CRITICAL,
             DOMAIN_STATUS, LAST_CHECKED, MODEL_VERSION
-        FROM OTIF_GUARDIAN.AUDIT.V_OPERATIONAL_SUMMARY
+        FROM {OBJECTS['operational_summary']}
     """, ttl=SYSTEM_STATUS_CACHE_TTL)
 
 
@@ -638,7 +638,7 @@ def get_operational_detail(domain=None):
     return cached_query(f"""
         SELECT DOMAIN, SUBDOMAIN, STATUS, METRIC_VALUE, METRIC_LABEL,
             CHECKED_AT, MODEL_VERSION, DETAIL
-        FROM OTIF_GUARDIAN.AUDIT.V_OPERATIONAL_HEALTH
+        FROM {OBJECTS['operational_health']}
         {where}
         ORDER BY DOMAIN, SUBDOMAIN, STATUS DESC
     """)
@@ -776,3 +776,112 @@ def _generate_demo_risk():
             "SUPPLIER_TIER": random.choice([1, 2, 3]),
         })
     return pd.DataFrame(rows)
+
+
+# ── Risk Tier Distribution ──────────────────────────────────
+def get_risk_tier_distribution():
+    if is_demo_mode():
+        return pd.DataFrame({"RISK_TIER": ["CRITICAL", "HIGH", "MEDIUM", "LOW"], "LINE_COUNT": [12, 38, 89, 239], "TOTAL_VALUE": [450000, 1200000, 2100000, 4500000], "AVG_BREACH_PROB": [0.85, 0.65, 0.35, 0.12]})
+    return cached_query(f"""
+        SELECT RISK_TIER, COUNT(*) AS LINE_COUNT, 
+            ROUND(SUM(LINE_VALUE), 2) AS TOTAL_VALUE,
+            ROUND(AVG(BREACH_PROBABILITY), 4) AS AVG_BREACH_PROB
+        FROM {OBJECTS['risk_lines']}
+        GROUP BY RISK_TIER
+        ORDER BY CASE RISK_TIER WHEN 'CRITICAL' THEN 1 WHEN 'HIGH' THEN 2 WHEN 'MEDIUM' THEN 3 ELSE 4 END
+    """, ttl=QUERY_CACHE_TTL)
+
+
+def get_recovery_impact_summary():
+    if is_demo_mode():
+        return {"addressable": 378, "feasible_actions": 457, "revenue_protected": 771700, "net_value": 814920, "portfolio_roi": 18.86, "otif_lift": 67.72}
+    try:
+        df = cached_query(f"SELECT * FROM {OBJECTS['recovery_portfolio']}", ttl=QUERY_CACHE_TTL)
+        if not df.empty:
+            r = df.iloc[0]
+            return {
+                "addressable": int(r.get("AT_RISK_LINES_ADDRESSABLE", 0)),
+                "feasible_actions": int(r.get("TOTAL_FEASIBLE_ACTIONS", 0)),
+                "revenue_protected": float(r.get("TOTAL_REVENUE_PROTECTED", 0)),
+                "net_value": float(r.get("TOTAL_NET_VALUE_PROTECTED", 0)),
+                "portfolio_roi": float(r.get("PORTFOLIO_ROI_MULTIPLE", 0)),
+                "otif_lift": float(r.get("CUMULATIVE_OTIF_LIFT_POINTS", 0)),
+            }
+    except Exception:
+        pass
+    return {"addressable": 0, "feasible_actions": 0, "revenue_protected": 0, "net_value": 0, "portfolio_roi": 0, "otif_lift": 0}
+
+
+def get_decision_assumptions():
+    if is_demo_mode():
+        return pd.DataFrame({"CATEGORY": ["EXPEDITE"], "PARAM_NAME": ["COST_PER_KG_DEFAULT"], "PARAM_VALUE": [1.0], "UNIT": ["$/kg"], "DESCRIPTION": ["Default expedite cost"]})
+    return cached_query(f"""
+        SELECT CATEGORY, PARAM_NAME, PARAM_VALUE, UNIT, DESCRIPTION, LAST_REVIEWED
+        FROM {OBJECTS['decision_assumptions']}
+        WHERE IS_ACTIVE = TRUE
+        ORDER BY CATEGORY, PARAM_NAME
+    """, ttl=SYSTEM_STATUS_CACHE_TTL)
+
+
+# ── Data Quality Functions ──────────────────────────────────
+def get_dq_gate_status():
+    if is_demo_mode():
+        return {"gate_status": "PASS", "critical_failures": 0, "total_checks": 81, "passed": 77, "warnings": 4}
+    try:
+        row = cached_query(f"""
+            SELECT GATE_STATUS, TOTAL_CHECKS, PASSED, WARNINGS, CRITICAL_FAILURES 
+            FROM {OBJECTS['dq_run_summary']} ORDER BY STARTED_AT DESC LIMIT 1
+        """, ttl=SYSTEM_STATUS_CACHE_TTL)
+        if not row.empty:
+            r = row.iloc[0]
+            return {
+                "gate_status": r.get("GATE_STATUS", "UNKNOWN"),
+                "critical_failures": int(r.get("CRITICAL_FAILURES", 0)),
+                "total_checks": int(r.get("TOTAL_CHECKS", 0)),
+                "passed": int(r.get("PASSED", 0)),
+                "warnings": int(r.get("WARNINGS", 0)),
+            }
+    except Exception:
+        pass
+    return {"gate_status": "UNKNOWN", "critical_failures": 0, "total_checks": 0, "passed": 0, "warnings": 0}
+
+
+def get_dq_category_summary():
+    if is_demo_mode():
+        return pd.DataFrame({"CATEGORY": ["SCHEMA", "NULLS", "DUPLICATES"], "TOTAL": [8, 10, 5], "PASSED": [8, 10, 5], "FAILED": [0, 0, 0]})
+    return cached_query(f"SELECT * FROM {OBJECTS['dq_category_summary']}", ttl=SYSTEM_STATUS_CACHE_TTL)
+
+
+def get_dq_failures():
+    if is_demo_mode():
+        return pd.DataFrame()
+    return cached_query(f"SELECT * FROM {OBJECTS['dq_failures']}", ttl=SYSTEM_STATUS_CACHE_TTL)
+
+
+def get_observability_dashboard():
+    if is_demo_mode():
+        return pd.DataFrame({
+            "DOMAIN": ["DATA", "ML", "AGENT", "BUSINESS"],
+            "TOTAL_CHECKS": [12, 10, 6, 8],
+            "HEALTHY": [11, 9, 4, 7],
+            "WARNINGS": [1, 1, 2, 1],
+            "CRITICAL": [0, 0, 0, 0],
+            "DOMAIN_STATUS": ["WARNING", "WARNING", "WARNING", "WARNING"],
+            "LAST_CHECKED": ["(demo)"] * 4,
+            "MODEL_VERSION": ["V3"] * 4,
+        })
+    return cached_query(f"SELECT * FROM {OBJECTS['observability_dashboard']}", ttl=SYSTEM_STATUS_CACHE_TTL)
+
+
+def get_monitoring_details(layer=None):
+    if is_demo_mode():
+        return pd.DataFrame()
+    where = f"WHERE CATEGORY LIKE ''{layer}%''" if layer else ""
+    return cached_query(f"""
+        SELECT CATEGORY, CHECK_NAME, STATUS, SEVERITY, CURRENT_VALUE, 
+            THRESHOLD_WARNING, THRESHOLD_CRITICAL, MESSAGE, MODEL_VERSION, RUN_AT
+        FROM {OBJECTS['monitoring_results']}
+        WHERE RUN_ID = (SELECT MAX(RUN_ID) FROM {OBJECTS['monitoring_results']})
+        {("AND CATEGORY LIKE ''" + layer + "%''") if layer else ""}
+        ORDER BY CASE STATUS WHEN ''CRITICAL'' THEN 1 WHEN ''WARNING'' THEN 2 ELSE 3 END, CATEGORY
+    """, ttl=SYSTEM_STATUS_CACHE_TTL)

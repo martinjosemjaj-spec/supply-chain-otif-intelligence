@@ -1,0 +1,28 @@
+definition_version: 2
+entities:
+  otif_guardian:
+    type: streamlit
+    identifier:
+      name: OTIF_GUARDIAN_APP
+      database: OTIF_GUARDIAN
+      schema: STREAMLIT
+    query_warehouse: OTIF_GUARDIAN_WH
+    runtime_name: SYSTEM$ST_CONTAINER_RUNTIME_PY3_11
+    compute_pool: SYSTEM_COMPUTE_POOL_CPU
+    main_file: app.py
+    artifacts:
+      - app.py
+      - lib/__init__.py
+      - lib/config.py
+      - lib/data.py
+      - pages/01_executive_dashboard.py
+      - pages/02_risk_center.py
+      - pages/03_recovery_center.py
+      - pages/04_governed_copilot.py
+      - pages/05_settings.py
+      - pages/10_risk_command_center.py
+      - pages/11_po_decision_detail.py
+      - pages/12_governed_copilot.py
+      - pages/13_model_controls.py
+      - demo_data/demo_recovery_options.csv
+      - demo_data/demo_risk_exposure.csv

@@ -12,6 +12,8 @@ from lib.data import (
     get_feature_importance, get_data_freshness, get_prediction_time,
     get_scoring_time, run_query, is_demo_mode, fmt_number,
     get_operational_summary, get_operational_detail,
+    get_dq_gate_status, get_dq_category_summary, get_dq_failures,
+    get_observability_dashboard, get_monitoring_details,
 )
 from lib.config import OBJECTS
 
@@ -227,6 +229,85 @@ try:
         st.info("Unable to determine data freshness.")
 except Exception as e:
     st.error(f"{e}")
+
+st.markdown("---")
+
+# ── Data Quality Gate ────────────────────────────────────────
+st.markdown("#### Data Quality Gate")
+
+try:
+    dq = get_dq_gate_status()
+    gate = dq.get("gate_status", "UNKNOWN")
+    gate_colors = {"PASS": "#36B37E", "BLOCKED": "#DE350B", "PENDING": "#FFAB00", "UNKNOWN": "#999"}
+    gate_color = gate_colors.get(gate, "#999")
+
+    g1, g2, g3, g4 = st.columns(4)
+    with g1:
+        st.markdown(f"**Gate Status:** <span style='color:{gate_color};font-weight:bold'>{gate}</span>", unsafe_allow_html=True)
+    with g2:
+        st.metric("Total Checks", dq.get("total_checks", 0))
+    with g3:
+        st.metric("Passed", dq.get("passed", 0))
+    with g4:
+        crit = dq.get("critical_failures", 0)
+        st.metric("Critical Failures", crit, delta=f"-{crit}" if crit > 0 else None, delta_color="inverse" if crit > 0 else "off")
+
+    if gate == "BLOCKED":
+        st.error("SCORING BLOCKED: Critical data quality failures detected. Model scoring must not proceed until resolved.")
+
+    cat_df = get_dq_category_summary()
+    if not cat_df.empty:
+        st.markdown("**Category Breakdown**")
+        st.dataframe(cat_df, use_container_width=True, hide_index=True)
+
+    fail_df = get_dq_failures()
+    if not fail_df.empty:
+        st.markdown("**Active Failures**")
+        st.dataframe(fail_df, use_container_width=True, hide_index=True)
+
+except Exception as e:
+    st.warning(f"Unable to load DQ status: {e}")
+
+st.markdown("---")
+
+# ── 4-Layer Observability ────────────────────────────────────
+st.markdown("#### Observability (4 Layers)")
+
+try:
+    obs = get_observability_dashboard()
+    if not obs.empty:
+        layer_cols = st.columns(4)
+        status_colors = {"HEALTHY": "#36B37E", "WARNING": "#FFAB00", "CRITICAL": "#DE350B"}
+        layer_icons = {"DATA": "DATA", "ML": "ML", "AGENT": "AGENT", "BUSINESS": "BUSINESS"}
+
+        for i, (_, row) in enumerate(obs.iterrows()):
+            domain = row["DOMAIN"]
+            status = row["DOMAIN_STATUS"]
+            color = status_colors.get(status, "#888")
+            with layer_cols[i % 4]:
+                st.markdown(
+                    f'<div style="border:2px solid {color}; border-radius:8px; '
+                    f'padding:0.8rem; text-align:center; min-height:120px;">'
+                    f'<div style="font-size:0.85rem; color:#666; text-transform:uppercase;">{domain}</div>'
+                    f'<div style="font-size:1.3rem; font-weight:700; color:{color}; margin:0.3rem 0;">{status}</div>'
+                    f'<div style="font-size:0.78rem; color:#888;">'
+                    f'{int(row["HEALTHY"])}/{int(row["TOTAL_CHECKS"])} healthy</div>'
+                    f'<div style="font-size:0.72rem; color:#aaa;">v{row["MODEL_VERSION"] or "?"}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+        with st.expander("Layer Details"):
+            for layer in ["DATA", "ML", "AGENT", "BUSINESS"]:
+                details = get_monitoring_details(layer)
+                if not details.empty:
+                    st.markdown(f"**{layer}**")
+                    st.dataframe(details[["CATEGORY", "CHECK_NAME", "STATUS", "CURRENT_VALUE", "THRESHOLD_WARNING", "THRESHOLD_CRITICAL", "MESSAGE"]],
+                                 use_container_width=True, hide_index=True)
+    else:
+        st.info("No observability data. Run `CALL OTIF_GUARDIAN.AUDIT.SP_RUN_OBSERVABILITY()` to populate.")
+except Exception as e:
+    st.warning(f"Unable to load observability: {e}")
 
 st.markdown("---")
 

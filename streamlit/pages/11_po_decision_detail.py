@@ -201,6 +201,45 @@ try:
 except Exception as e:
     st.error(f"Failed to load recovery options: {e}")
 
+# ── Before / After for Best Action ──────────────────────────
+try:
+    if 'recovery' in dir() and not recovery.empty:
+        best = recovery.iloc[0]
+        if best.get("IS_FEASIBLE", False):
+            st.markdown("##### Best Action: Before vs After")
+            ba1, ba2, ba3 = st.columns(3)
+            breach_prob = detail.iloc[0].get("BREACH_PROBABILITY", 0) if not detail.empty else 0
+            line_val = detail.iloc[0].get("LINE_VALUE", 0) if not detail.empty else 0
+            otif_lift = float(best.get("OTIF_LIFT", 0) or 0)
+            cost = float(best.get("INCREMENTAL_COST", 0) or 0)
+            rev_prot = float(best.get("REVENUE_PROTECTED", 0) or 0)
+            success_p = float(best.get("SUCCESS_PROBABILITY", 0) or 0)
+
+            with ba1:
+                st.markdown(
+                    f'<div style="border:1px solid #FF5630; border-radius:6px; padding:0.6rem; text-align:center;">'
+                    f'<div style="font-size:0.75rem; color:#888;">CURRENT</div>'
+                    f'<div style="font-size:1.1rem; font-weight:700; color:#FF5630;">{fmt_prob(breach_prob)} breach</div>'
+                    f'<div style="font-size:0.8rem;">{fmt_dollar(line_val)} at risk</div>'
+                    f'</div>', unsafe_allow_html=True)
+            with ba2:
+                st.markdown(
+                    f'<div style="text-align:center; padding:0.6rem;">'
+                    f'<div style="font-size:0.75rem; color:#888;">{best.get("ACTION_TYPE","")}</div>'
+                    f'<div style="font-size:1.2rem;">→</div>'
+                    f'<div style="font-size:0.8rem; color:#36B37E;">+{otif_lift:.2f}pp lift</div>'
+                    f'<div style="font-size:0.75rem; color:#888;">Cost: {fmt_dollar(cost)}</div>'
+                    f'</div>', unsafe_allow_html=True)
+            with ba3:
+                st.markdown(
+                    f'<div style="border:1px solid #36B37E; border-radius:6px; padding:0.6rem; text-align:center;">'
+                    f'<div style="font-size:0.75rem; color:#888;">AFTER ACTION</div>'
+                    f'<div style="font-size:1.1rem; font-weight:700; color:#36B37E;">{fmt_dollar(rev_prot)} protected</div>'
+                    f'<div style="font-size:0.8rem;">{success_p:.0%} success probability</div>'
+                    f'</div>', unsafe_allow_html=True)
+except Exception:
+    pass
+
 # ── Unavailable fields ───────────────────────────────────────
 with st.expander("Unavailable prototype fields", expanded=False):
     for field in ["CONFIRMED_DELIVERY_DATE", "PROJECTED_STOCKOUT_DATE",

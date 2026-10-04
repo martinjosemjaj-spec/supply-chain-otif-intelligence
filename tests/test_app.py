@@ -218,11 +218,11 @@ class TestPODetail:
     def test_recovery_has_infeasible(self):
         """Per SKILL.md: include normal and infeasible-action cases."""
         df = get_po_recovery_options(30001)
-        assert any(df["IS_FEASIBLE"] is False) or any(~df["IS_FEASIBLE"])
+        assert not df["IS_FEASIBLE"].all()
 
     def test_recovery_has_feasible(self):
         df = get_po_recovery_options(30001)
-        assert any(df["IS_FEASIBLE"] is True) or any(df["IS_FEASIBLE"])
+        assert df["IS_FEASIBLE"].any()
 
 
 # ── Copilot Demo Tests ──────────────────────────────────────

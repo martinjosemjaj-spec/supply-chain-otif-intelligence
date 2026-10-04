@@ -652,38 +652,43 @@ def get_operational_detail(domain=None):
 
 
 def run_agent_query(question):
-    """Call the Cortex Agent. Returns (answer_text, trace_json, raw_response)."""
+    """Query via Cortex Analyst against the semantic view. Returns (answer_text, trace_json, raw_response)."""
     if not question or not question.strip():
         return ("Please enter a question.", None, None)
     if is_demo_mode():
         return _demo_agent_response(question)
     import json
     session = get_session()
-    request_body = json.dumps({
-        "messages": [{"role": "user", "content": [{"type": "text", "text": question}]}]
-    })
-    safe_body = request_body.replace("'", "''")
-    result = session.sql(f"""
-        SELECT SNOWFLAKE.CORTEX.DATA_AGENT_RUN(
-            '{OBJECTS['agent']}', '{safe_body}'
-        ) AS response
-    """).collect()
-    if not result:
-        return ("No response from agent.", None, None)
-    raw = result[0]["RESPONSE"]
+    sv = OBJECTS['agent_semantic_view']
+    safe_q = question.replace("'", "''")
     try:
+        result = session.sql(f"""
+            SELECT SNOWFLAKE.CORTEX.ANALYST_PREVIEW(
+                '{sv}',
+                '{safe_q}'
+            ) AS response
+        """).collect()
+        if not result:
+            return ("No response from Cortex Analyst.", None, None)
+        raw = result[0]["RESPONSE"]
         parsed = json.loads(raw) if isinstance(raw, str) else raw
-        parts = parsed.get("content", [])
-        texts = [p.get("text", "") for p in parts if p.get("type") == "text"]
-        tools = [p.get("tool_use", {}).get("name", "unknown")
-                 for p in parts if p.get("type") == "tool_use"]
-        answer = "\n".join(texts) if texts else str(raw)
-        trace = json.dumps({"tools_invoked": tools, "grounding": "SQL tool results",
-                            "guardrail": "No LLM calculations"}, indent=2) if tools else None
-    except (json.JSONDecodeError, TypeError):
-        answer = str(raw)
-        trace = None
-    return (answer, trace, raw)
+        answer_text = parsed.get("answer", "")
+        sql_text = parsed.get("sql", "")
+        if sql_text:
+            try:
+                sql_result = session.sql(sql_text).to_pandas()
+                if not sql_result.empty:
+                    table_str = sql_result.head(20).to_markdown(index=False)
+                    answer_text = f"{answer_text}\n\n{table_str}" if answer_text else table_str
+            except Exception:
+                answer_text = f"{answer_text}\n\n**SQL:** `{sql_text}`" if answer_text else f"**SQL:** `{sql_text}`"
+        if not answer_text:
+            answer_text = str(raw)
+        trace = json.dumps({"source": "Cortex Analyst", "semantic_view": sv,
+                            "sql": sql_text, "grounding": "governed semantic view"}, indent=2) if sql_text else None
+    except Exception as e:
+        return (f"Analyst query failed: {e}", None, None)
+    return (answer_text, trace, raw)
 
 
 # ── Demo Helpers ─────────────────────────────────────────────

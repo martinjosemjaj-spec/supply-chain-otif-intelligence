@@ -31,6 +31,7 @@ OBJECTS = {
     "customer_orders": f"{DB}.RAW.CUSTOMER_ORDERS",
     "recovery_log": f"{DB}.ML.RECOVERY_ENGINE_LOG",
     "agent": f"{DB}.AGENTS.OTIF_GUARDIAN_AGENT",
+    "agent_semantic_view": f"{DB}.SEMANTIC.OTIF_GUARDIAN_SUPPLY_CHAIN",
     "monitoring_overall": f"{DB}.AUDIT.V_MONITORING_OVERALL",
     "monitoring_dashboard": f"{DB}.AUDIT.V_MONITORING_DASHBOARD",
     "evidence_package": f"{DB}.ML.V_EVIDENCE_PACKAGE",

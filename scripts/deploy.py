@@ -297,7 +297,7 @@ def deploy_stage(conn, stage, env_config, config, dry_run=False, env_name="DEV")
             if result.returncode != 0:
                 print(f"    Command failed: {result.stderr[:300]}")
                 # Don't fail on CLI commands — they may need manual execution
-                print(f"    WARNING: Command may need manual execution")
+                print("    WARNING: Command may need manual execution")
 
     # Run validation gate if defined and required for this environment
     gate_name = stage.get("gate")
@@ -369,7 +369,7 @@ def main():
     env_config = config["environments"][env_name]
     stages = sorted(config["stages"], key=lambda s: s["order"])
 
-    print(f"OTIF Guardian Deployment")
+    print("OTIF Guardian Deployment")
     print(f"  Environment: {env_name}")
     print(f"  Database:    {env_config['database']}")
     print(f"  Warehouse:   {env_config['warehouse']}")
@@ -377,7 +377,7 @@ def main():
     print(f"  Timestamp:   {datetime.now().isoformat()}")
 
     if args.dry_run:
-        print(f"\n  MODE: DRY-RUN (no changes will be made)")
+        print("\n  MODE: DRY-RUN (no changes will be made)")
         if args.stage:
             target = [s for s in stages if s["name"] == args.stage]
             stages = target if target else stages
@@ -424,7 +424,7 @@ def main():
 
         # PROD deployment approval
         if env_name == "PROD" and env_config.get("deployment_approval"):
-            print(f"\nPROD DEPLOYMENT REQUIRES APPROVAL")
+            print("\nPROD DEPLOYMENT REQUIRES APPROVAL")
             print(f"Stages to deploy: {[s['name'] for s in stages]}")
             confirm = input("Type 'DEPLOY PROD' to confirm: ")
             if confirm != "DEPLOY PROD":

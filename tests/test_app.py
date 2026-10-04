@@ -6,7 +6,6 @@ Requires: OTIF_GUARDIAN_MODE=demo (no Snowflake connection needed)
 
 import os
 import sys
-import pytest
 import pandas as pd
 
 # Force demo mode for all tests
@@ -17,7 +16,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "streamlit"))
 
 from lib.config import (
     APP_MODE, OBJECTS, FIELD_MAP, RISK_BANDS, DEFAULT_RISK_BANDS,
-    UNAVAILABLE_FIELDS, COMMAND_CENTER_PAGE_SIZE,
+    UNAVAILABLE_FIELDS,
 )
 from lib.data import (
     is_demo_mode, fmt_dollar, fmt_pct, fmt_prob, fmt_number, fmt_days,
@@ -38,7 +37,7 @@ class TestConfig:
 
     def test_objects_has_required_keys(self):
         required = ["risk_lines", "scored_results", "recovery_recs",
-                     "best_recovery", "reason_codes", "agent", "plants"]
+                    "best_recovery", "reason_codes", "agent", "plants"]
         for key in required:
             assert key in OBJECTS, f"Missing object key: {key}"
 
@@ -75,7 +74,6 @@ class TestFormatting:
         assert fmt_dollar(None) == "N/A"
 
     def test_fmt_dollar_nan(self):
-        import math
         assert fmt_dollar(float("nan")) == "N/A"
 
     def test_fmt_pct(self):
@@ -220,11 +218,11 @@ class TestPODetail:
     def test_recovery_has_infeasible(self):
         """Per SKILL.md: include normal and infeasible-action cases."""
         df = get_po_recovery_options(30001)
-        assert any(df["IS_FEASIBLE"] == False)
+        assert any(df["IS_FEASIBLE"] is False) or any(~df["IS_FEASIBLE"])
 
     def test_recovery_has_feasible(self):
         df = get_po_recovery_options(30001)
-        assert any(df["IS_FEASIBLE"] == True)
+        assert any(df["IS_FEASIBLE"] is True) or any(df["IS_FEASIBLE"])
 
 
 # ── Copilot Demo Tests ──────────────────────────────────────
@@ -360,13 +358,15 @@ class TestMonitoring:
 
 class TestFilterConsistency:
     def test_risk_kpis_accept_all_filter_params(self):
-        df = get_risk_kpi_metrics(plant_filter="PLT-MFG-01",
-                                   risk_bands=["CRITICAL"], min_revenue=1000)
+        df = get_risk_kpi_metrics(
+            plant_filter="PLT-MFG-01",
+            risk_bands=["CRITICAL"], min_revenue=1000)
         assert isinstance(df, pd.DataFrame)
 
     def test_revenue_by_plant_accepts_filters(self):
-        df = get_revenue_by_plant(plant_filter="All",
-                                   risk_bands=["CRITICAL", "HIGH"], min_revenue=0)
+        df = get_revenue_by_plant(
+            plant_filter="All",
+            risk_bands=["CRITICAL", "HIGH"], min_revenue=0)
         assert isinstance(df, pd.DataFrame)
 
     def test_risk_command_center_empty_bands(self):
@@ -374,9 +374,10 @@ class TestFilterConsistency:
         assert df.empty
 
     def test_risk_command_center_with_all_filters(self):
-        df = get_risk_command_center(plant_filter="PLT-MFG-02",
-                                     risk_bands=["HIGH", "MEDIUM"],
-                                     min_revenue=500, limit=5)
+        df = get_risk_command_center(
+            plant_filter="PLT-MFG-02",
+            risk_bands=["HIGH", "MEDIUM"],
+            min_revenue=500, limit=5)
         assert len(df) <= 5
 
 
@@ -384,9 +385,6 @@ class TestFilterConsistency:
 
 class TestEmptyStates:
     def test_functions_return_dataframes_not_none(self):
-        from lib.data import (get_risk_command_center, get_risk_kpi_metrics,
-                              get_revenue_by_plant, get_po_detail,
-                              get_po_reason_codes, get_po_recovery_options)
         for fn in [get_risk_kpi_metrics, get_revenue_by_plant]:
             result = fn()
             assert isinstance(result, pd.DataFrame), f"{fn.__name__} returned {type(result)}"
@@ -429,7 +427,7 @@ class TestObservability:
         from lib.data import get_operational_summary
         df = get_operational_summary()
         for col in ["DOMAIN", "TOTAL_CHECKS", "HEALTHY", "WARNINGS",
-                     "CRITICAL", "DOMAIN_STATUS", "LAST_CHECKED", "MODEL_VERSION"]:
+                    "CRITICAL", "DOMAIN_STATUS", "LAST_CHECKED", "MODEL_VERSION"]:
             assert col in df.columns, f"Missing column: {col}"
 
     def test_operational_summary_status_values(self):
@@ -456,4 +454,3 @@ class TestObservability:
         from lib.data import get_operational_detail
         df = get_operational_detail(domain="ML")
         assert isinstance(df, pd.DataFrame)
-

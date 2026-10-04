@@ -12,6 +12,7 @@ entities:
     main_file: app.py
     artifacts:
       - app.py
+      - pyproject.toml
       - lib/__init__.py
       - lib/config.py
       - lib/data.py

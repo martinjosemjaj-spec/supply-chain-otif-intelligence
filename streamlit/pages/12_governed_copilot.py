@@ -54,18 +54,10 @@ if selected_po:
     suggestions.insert(1, f"Why is PO line {selected_po} high risk?")
     suggestions.append(f"What is the best feasible recovery action for PO line {selected_po}?")
 
-row1 = st.columns(min(len(suggestions), 4))
-clicked_suggestion = None
-for i, s in enumerate(suggestions[:4]):
-    with row1[i]:
-        if st.button(s, key=f"suggest_{i}", use_container_width=True):
-            clicked_suggestion = s
-
-row2 = st.columns(min(len(suggestions) - 4, 4)) if len(suggestions) > 4 else []
-for i, s in enumerate(suggestions[4:8]):
-    with row2[i]:
-        if st.button(s, key=f"suggest_{i+4}", use_container_width=True):
-            clicked_suggestion = s
+for i, s in enumerate(suggestions):
+    if st.button(s, key=f"suggest_{i}", use_container_width=True):
+        st.session_state["copilot_pending_question"] = s
+        st.rerun()
 
 st.markdown("---")
 
@@ -90,12 +82,14 @@ for entry in st.session_state.copilot_history:
             st.code(entry["trace"], language="json")
 
 # ── Input ────────────────────────────────────────────────────
+pending = st.session_state.pop("copilot_pending_question", None)
+
 st.markdown("---")
 c1, c2 = st.columns([5, 1])
 with c1:
     user_input = st.text_input(
         "Your question",
-        value=clicked_suggestion or "",
+        value=pending or "",
         placeholder="Ask about OTIF performance, risk, or recovery...",
         key="copilot_v2_input",
         label_visibility="collapsed",
@@ -103,8 +97,9 @@ with c1:
 with c2:
     send_btn = st.button("Send ➤", use_container_width=True, key="copilot_v2_send")
 
-if (send_btn or clicked_suggestion) and user_input and user_input.strip():
-    question = user_input.strip()
+question = pending or (user_input.strip() if (send_btn and user_input) else None)
+
+if question:
     if len(question) > 2000:
         st.error("Question too long (max 2000 characters).")
     else:

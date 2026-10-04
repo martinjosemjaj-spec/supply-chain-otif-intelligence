@@ -217,7 +217,7 @@ def get_prediction_time():
     if is_demo_mode():
         return "(demo mode)"
     try:
-        df = run_query(f"SELECT MAX(execution_timestamp) AS last_run FROM {OBJECTS['recovery_log']}")
+        df = run_query(f"SELECT MAX(EXECUTED_AT) AS LAST_RUN FROM {OBJECTS['recovery_log']}")
         if not df.empty and df.iloc[0]["LAST_RUN"] is not None:
             return df.iloc[0]["LAST_RUN"]
     except Exception:
@@ -631,7 +631,7 @@ def get_operational_summary():
     return cached_query(f"""
         SELECT DOMAIN, TOTAL_CHECKS, HEALTHY, WARNINGS, CRITICAL,
             DOMAIN_STATUS, LAST_CHECKED, MODEL_VERSION
-        FROM {OBJECTS['operational_summary']}
+        FROM {OBJECTS['observability_dashboard']}
     """, ttl=SYSTEM_STATUS_CACHE_TTL)
 
 
@@ -641,11 +641,10 @@ def get_operational_detail(domain=None):
         return pd.DataFrame()
     where = f"WHERE DOMAIN = '{domain}'" if domain else ""
     return cached_query(f"""
-        SELECT DOMAIN, SUBDOMAIN, STATUS, METRIC_VALUE, METRIC_LABEL,
-            CHECKED_AT, MODEL_VERSION, DETAIL
+        SELECT DOMAIN, STATUS, DETAIL
         FROM {OBJECTS['operational_health']}
         {where}
-        ORDER BY DOMAIN, SUBDOMAIN, STATUS DESC
+        ORDER BY DOMAIN, STATUS DESC
     """)
 
 

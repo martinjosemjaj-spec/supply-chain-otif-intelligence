@@ -88,8 +88,7 @@ try:
                                 st.markdown(f"**{row['DOMAIN']}**")
                                 for _, d in issues.iterrows():
                                     st.markdown(
-                                        f"- [{d['STATUS']}] {d['SUBDOMAIN']}: "
-                                        f"{d['METRIC_LABEL'] or ''} — {d['DETAIL'] or ''}"
+                                        f"- [{d['STATUS']}] {d.get('DETAIL', '')}"
                                     )
         else:
             st.success("All systems operational.")

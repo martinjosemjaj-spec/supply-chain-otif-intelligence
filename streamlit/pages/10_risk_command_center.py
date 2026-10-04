@@ -5,7 +5,8 @@ Spec: SKILL.md S6
 """
 
 import streamlit as st
-import sys, os
+import sys
+import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from lib.data import (
     get_risk_command_center, get_risk_kpi_metrics, get_revenue_by_plant,

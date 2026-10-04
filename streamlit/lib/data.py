@@ -13,7 +13,7 @@ except ImportError:
     _HAS_ST = False
 
 from lib.config import (
-    APP_MODE, OBJECTS, CACHE_TTL_SECONDS, UNAVAILABLE_FIELDS,
+    APP_MODE, OBJECTS, UNAVAILABLE_FIELDS,
     QUERY_CACHE_TTL, SYSTEM_STATUS_CACHE_TTL,
 )
 
@@ -783,7 +783,7 @@ def get_risk_tier_distribution():
     if is_demo_mode():
         return pd.DataFrame({"RISK_TIER": ["CRITICAL", "HIGH", "MEDIUM", "LOW"], "LINE_COUNT": [12, 38, 89, 239], "TOTAL_VALUE": [450000, 1200000, 2100000, 4500000], "AVG_BREACH_PROB": [0.85, 0.65, 0.35, 0.12]})
     return cached_query(f"""
-        SELECT RISK_TIER, COUNT(*) AS LINE_COUNT, 
+        SELECT RISK_TIER, COUNT(*) AS LINE_COUNT,
             ROUND(SUM(LINE_VALUE), 2) AS TOTAL_VALUE,
             ROUND(AVG(BREACH_PROBABILITY), 4) AS AVG_BREACH_PROB
         FROM {OBJECTS['risk_lines']}
@@ -829,7 +829,7 @@ def get_dq_gate_status():
         return {"gate_status": "PASS", "critical_failures": 0, "total_checks": 81, "passed": 77, "warnings": 4}
     try:
         row = cached_query(f"""
-            SELECT GATE_STATUS, TOTAL_CHECKS, PASSED, WARNINGS, CRITICAL_FAILURES 
+            SELECT GATE_STATUS, TOTAL_CHECKS, PASSED, WARNINGS, CRITICAL_FAILURES
             FROM {OBJECTS['dq_run_summary']} ORDER BY STARTED_AT DESC LIMIT 1
         """, ttl=SYSTEM_STATUS_CACHE_TTL)
         if not row.empty:
@@ -876,12 +876,12 @@ def get_observability_dashboard():
 def get_monitoring_details(layer=None):
     if is_demo_mode():
         return pd.DataFrame()
-    where = f"WHERE CATEGORY LIKE ''{layer}%''" if layer else ""
+    layer_filter = ("AND CATEGORY LIKE ''" + layer + "%''") if layer else ""
     return cached_query(f"""
-        SELECT CATEGORY, CHECK_NAME, STATUS, SEVERITY, CURRENT_VALUE, 
+        SELECT CATEGORY, CHECK_NAME, STATUS, SEVERITY, CURRENT_VALUE,
             THRESHOLD_WARNING, THRESHOLD_CRITICAL, MESSAGE, MODEL_VERSION, RUN_AT
         FROM {OBJECTS['monitoring_results']}
         WHERE RUN_ID = (SELECT MAX(RUN_ID) FROM {OBJECTS['monitoring_results']})
-        {("AND CATEGORY LIKE ''" + layer + "%''") if layer else ""}
+        {layer_filter}
         ORDER BY CASE STATUS WHEN ''CRITICAL'' THEN 1 WHEN ''WARNING'' THEN 2 ELSE 3 END, CATEGORY
     """, ttl=SYSTEM_STATUS_CACHE_TTL)

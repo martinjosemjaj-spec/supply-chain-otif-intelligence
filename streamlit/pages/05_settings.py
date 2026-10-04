@@ -7,9 +7,9 @@ import streamlit as st
 import sys
 sys.path.insert(0, "..")
 from lib.data import (
-    get_session, get_model_version, get_prediction_time,
+    get_model_version, get_prediction_time,
     get_data_freshness, get_model_metrics, get_confusion_matrix,
-    run_query, fmt_number
+    run_query
 )
 
 # ── Page Header ──────────────────────────────────────────────
@@ -185,5 +185,5 @@ try:
         st.dataframe(log, use_container_width=True)
     else:
         st.info("No execution history. Run the recovery engine to populate.")
-except Exception as e:
+except Exception:
     st.caption("Recovery engine log not yet created.")

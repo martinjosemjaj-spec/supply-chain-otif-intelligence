@@ -5,12 +5,13 @@ Spec: SKILL.md S7
 """
 
 import streamlit as st
-import sys, os
+import sys
+import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from lib.data import (
     get_po_detail, get_po_reason_codes, get_po_recovery_options,
     get_risk_command_center, get_model_version_str, get_prediction_time,
-    get_scoring_time, get_evidence_package, get_evidence_recovery,
+    get_scoring_time, get_evidence_package,
     fmt_dollar, fmt_prob, fmt_number, fmt_days, is_demo_mode, unavailable_msg,
 )
 
@@ -208,8 +209,8 @@ try:
         if best.get("IS_FEASIBLE", False):
             st.markdown("##### Best Action: Before vs After")
             ba1, ba2, ba3 = st.columns(3)
-            breach_prob = detail.iloc[0].get("BREACH_PROBABILITY", 0) if not detail.empty else 0
-            line_val = detail.iloc[0].get("LINE_VALUE", 0) if not detail.empty else 0
+            breach_prob = detail_df.iloc[0].get("BREACH_PROBABILITY", 0) if not detail_df.empty else 0
+            line_val = detail_df.iloc[0].get("LINE_VALUE", 0) if not detail_df.empty else 0
             otif_lift = float(best.get("OTIF_LIFT", 0) or 0)
             cost = float(best.get("INCREMENTAL_COST", 0) or 0)
             rev_prot = float(best.get("REVENUE_PROTECTED", 0) or 0)
@@ -260,24 +261,24 @@ try:
         ev = evidence.iloc[0]
         e1, e2, e3, e4 = st.columns(4)
         with e1:
-            st.markdown(f"**Model Version**")
+            st.markdown("**Model Version**")
             st.code(str(ev.get("MODEL_VERSION", "N/A")))
         with e2:
-            st.markdown(f"**Feature Set**")
+            st.markdown("**Feature Set**")
             st.code(str(ev.get("FEATURE_SET_VERSION", "N/A")))
         with e3:
-            st.markdown(f"**Data Freshness**")
+            st.markdown("**Data Freshness**")
             ts = ev.get("DATA_FRESHNESS_TIMESTAMP", "N/A")
             st.code(str(ts)[:19] if ts else "N/A")
         with e4:
-            st.markdown(f"**Calculation Type**")
+            st.markdown("**Calculation Type**")
             st.code(str(ev.get("CALCULATION_TYPE", "DETERMINISTIC")))
 
         with st.expander("Full Evidence Trace", expanded=False):
             st.markdown(f"**Source Views**: `{ev.get('SOURCE_GOVERNED_VIEWS', 'N/A')}`")
             st.markdown(f"**Scored With**: Model `{ev.get('SCORED_WITH_VERSION', 'N/A')}`")
-            st.markdown(f"**Exposure Formula**: `line_value * breach_prob + downstream_prob_weighted`")
-            st.markdown(f"**Recovery Formula**: `revenue_protected - recovery_cost` (governed assumptions)")
+            st.markdown("**Exposure Formula**: `line_value * breach_prob + downstream_prob_weighted`")
+            st.markdown("**Recovery Formula**: `revenue_protected - recovery_cost` (governed assumptions)")
 
             # Show reason codes from evidence JSON
             reasons = ev.get("TOP_REASONS")

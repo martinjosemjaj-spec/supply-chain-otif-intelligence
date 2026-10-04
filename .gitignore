@@ -48,6 +48,7 @@ desktop.ini
 dist/
 build/
 *.egg-info/
+streamlit/output/
 
 # CI/CD
 test-results.xml

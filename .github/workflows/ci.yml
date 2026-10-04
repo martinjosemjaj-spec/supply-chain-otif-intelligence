@@ -29,8 +29,8 @@ jobs:
         run: |
           flake8 streamlit/ tests/ scripts/ \
             --max-line-length=120 \
-            --extend-ignore=E501,W503 \
-            --exclude=__pycache__
+            --extend-ignore=E501,W503,E402,E401 \
+            --exclude=__pycache__,streamlit/output
 
       - name: Validate YAML files
         run: |

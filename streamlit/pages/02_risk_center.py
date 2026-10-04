@@ -9,7 +9,7 @@ sys.path.insert(0, "..")
 from lib.data import (
     get_risk_summary, get_at_risk_lines, get_risk_by_supplier,
     get_risk_by_material, get_feature_importance, get_reason_codes_for_line,
-    get_model_version, get_prediction_time, fmt_pct
+    get_model_version, get_prediction_time
 )
 
 # ── Page Header ──────────────────────────────────────────────

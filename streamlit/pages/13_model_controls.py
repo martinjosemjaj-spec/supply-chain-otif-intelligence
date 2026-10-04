@@ -5,17 +5,17 @@ Spec: SKILL.md S10
 """
 
 import streamlit as st
-import sys, os
+import sys
+import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from lib.data import (
     get_model_version_str, get_model_metrics, get_confusion_matrix,
     get_feature_importance, get_data_freshness, get_prediction_time,
-    get_scoring_time, run_query, is_demo_mode, fmt_number,
+    get_scoring_time, run_query, is_demo_mode,
     get_operational_summary, get_operational_detail,
     get_dq_gate_status, get_dq_category_summary, get_dq_failures,
     get_observability_dashboard, get_monitoring_details,
 )
-from lib.config import OBJECTS
 
 # ── Header ───────────────────────────────────────────────────
 st.markdown("### Model & Controls")

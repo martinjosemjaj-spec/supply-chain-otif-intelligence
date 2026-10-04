@@ -5,13 +5,14 @@ Spec: SKILL.md S4, S5
 """
 
 import streamlit as st
-import sys, os
+import sys
+import os
 
 sys.path.insert(0, os.path.dirname(__file__))
 from lib.data import is_demo_mode, get_plants, get_system_status
 from lib.config import (
     RISK_BANDS, DEFAULT_RISK_BANDS, DEFAULT_MIN_REVENUE,
-    REVENUE_STEP, PLANNING_HORIZON_DAYS,
+    REVENUE_STEP,
 )
 
 st.set_page_config(

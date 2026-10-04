@@ -5,7 +5,8 @@ Spec: SKILL.md S8
 """
 
 import streamlit as st
-import sys, os
+import sys
+import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from lib.data import run_agent_query, is_demo_mode, get_system_status
 

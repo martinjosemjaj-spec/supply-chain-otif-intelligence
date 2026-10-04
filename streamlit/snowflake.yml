@@ -18,7 +18,6 @@ entities:
       - pages/01_executive_dashboard.py
       - pages/02_risk_center.py
       - pages/03_recovery_center.py
-      - pages/04_governed_copilot.py
       - pages/05_settings.py
       - pages/10_risk_command_center.py
       - pages/11_po_decision_detail.py
